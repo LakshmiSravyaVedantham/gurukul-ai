@@ -1,8 +1,10 @@
 # Gurukul AI — Kids Educational Video Pipeline
 
-A fully local, free, Apple Silicon pipeline for generating educational kids videos on NCERT math topics. No cloud APIs. No subscription fees. Runs entirely on your Mac.
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Platform: Apple Silicon](https://img.shields.io/badge/platform-Apple%20Silicon-black?logo=apple&logoColor=white)
 
-Current topic: **Probability (Class 6 NCERT)** — rendered in the *Probability Island* style.
+Fully local AI pipeline that generates educational kids videos — cinematic Pixar-style landscapes + neural TTS narration. Runs on Apple Silicon M-series Macs.
 
 ---
 
@@ -10,86 +12,61 @@ Current topic: **Probability (Class 6 NCERT)** — rendered in the *Probability 
 
 ```mermaid
 flowchart TD
-    A[Python Script\nScene definitions + narration text]
-
-    A -->|10 scene prompts| B[mflux — FLUX Dev model\n1360x768 · 20 steps · sequential]
-    A -->|narration text| C[Kokoro TTS\nvoice: am_adam · speed 0.88]
-
-    B --> D[Scene Images\nPNG · one per scene]
-    C --> E[Narration Audio\nWAV · one per scene]
-
-    D --> F[MoviePy\nAssembles image + audio per clip]
-    E --> F
-
-    F --> G[Showcase MP4\nFinal educational video]
-
-    G -->|future| H[Wan 2.2\nAnimates each scene image\ninto a video clip]
-
-    style A fill:#f5a623,color:#000
-    style B fill:#7b68ee,color:#fff
-    style C fill:#7b68ee,color:#fff
-    style D fill:#5cb85c,color:#fff
-    style E fill:#5cb85c,color:#fff
-    style F fill:#d9534f,color:#fff
-    style G fill:#0275d8,color:#fff
-    style H fill:#aaa,color:#fff,stroke-dasharray:5 5
+    A[📝 Script\nScene definitions + narration text] --> B[🖼️ mflux FLUX Dev\nText-to-image generation\n1360×768 · 20 steps · sequential]
+    A --> C[🎙️ TTS Engine]
+    C --> D{ELEVENLABS_API_KEY\nset?}
+    D -- Yes --> E[☁️ ElevenLabs\nAdam voice · multilingual v2]
+    D -- No --> F[🖥️ Kokoro TTS\nLocal · am_adam · speed 0.88]
+    E --> G[🎬 MoviePy\nImage + Audio → MP4]
+    F --> G
+    B --> G
+    G --> H[📹 Showcase MP4\nprobability_island.mp4]
+    H --> I[🎞️ Wan 2.2\nFuture: animate each scene]
 ```
 
 ---
 
 ## Visual Styles
 
-Three styles have been explored. The best results use **Probability Island**.
-
-| Style | Description | Status |
-|---|---|---|
-| **Probability Island** | Cinematic landscape — no characters. Each scene IS the concept (coin cliffs, dice plains, glowing fruit forest). Zero character consistency issues. | **BEST — use this** |
-| **Chalk World** | Hand-drawn chalk-on-blackboard aesthetic. Concepts illustrated as chalk diagrams. | Reference only |
-| **Magic Objects** | Floating magical props (coins, dice, bags) in a stylized world. | Reference only |
+| Style | Description | Best for |
+|-------|-------------|----------|
+| 🏝️ Probability Island | Cinematic landscapes — coin cliffs, dice plains, enchanted forest | Best visual quality, zero consistency issues |
+| ✏️ Chalk World | Dark chalkboard with chalk illustrations | Educational feel, text may hallucinate |
+| ✨ Magic Objects | Dramatic studio close-ups of objects | Clean concept visuals |
 
 ---
 
 ## Hardware Requirements
 
 | Component | Minimum | Recommended |
-|---|---|---|
-| Chip | Apple Silicon (M1/M2/M3/M4) | M4 Max |
-| RAM | 16 GB | **36 GB** (for FLUX Dev) |
-| Storage | 50 GB free | 100 GB free |
+|-----------|---------|-------------|
+| Chip | Apple Silicon M1 | M3 Max / M4 Max |
+| RAM | 16GB | 36GB+ |
+| Storage | 50GB free | 500GB+ (models) |
 | OS | macOS 13+ | macOS 15+ |
 
-> FLUX Dev at 1360x768 uses ~22 GB RAM on M4 Max. Schnell uses ~14 GB.
+> FLUX Dev at 1360×768 uses ~22 GB RAM on M4 Max. Schnell uses ~14 GB.
 
 ---
 
 ## Installation
 
-### 1. Set up mflux (FLUX image generation)
-
 ```bash
-# Create a virtual environment
-python3 -m venv venv
-source venv/bin/activate
+# 1. Clone
+git clone https://github.com/LakshmiSravyaVedantham/gurukul-ai
+cd gurukul-ai
 
-# Install mflux
-pip install mflux
+# 2. Create venv
+python3 -m venv venv && source venv/bin/activate
 
-# Models download automatically on first run (~30 GB for Dev, ~6 GB for Schnell)
-# Dev model path: ~/.cache/huggingface/hub/models--black-forest-labs--FLUX.1-dev
-```
+# 3. Install dependencies
+pip install mflux kokoro soundfile moviepy pillow elevenlabs numpy
 
-### 2. Set up Kokoro TTS
+# 4. (Optional) ElevenLabs for best voice quality
+export ELEVENLABS_API_KEY=your_key_here   # skip to use free local Kokoro TTS
 
-```bash
-pip install kokoro soundfile numpy
-```
-
-Kokoro runs fully offline after the first model download (~500 MB).
-
-### 3. Set up MoviePy
-
-```bash
-pip install moviepy
+# 5. Run
+python gurukul_island.py --all
 ```
 
 Also requires `ffmpeg` on your system:
@@ -98,48 +75,40 @@ Also requires `ffmpeg` on your system:
 brew install ffmpeg
 ```
 
+> Models download automatically on first run: FLUX Dev (~30 GB), Kokoro (~500 MB). Run once with internet, then fully offline.
+
 ---
 
 ## Usage
 
-### Probability Island (recommended)
-
 ```bash
-# Activate your venv first
-source venv/bin/activate
-
-# Generate all 10 scene images (~8 min on M4 Max with Dev model)
-python gurukul_island.py --scenes
-
-# Generate narration audio for all 10 scenes
-python gurukul_island.py --tts
-
-# Assemble the final MP4 showcase
-python gurukul_island.py --showcase
-
-# Run everything end-to-end
-python gurukul_island.py --all
+python gurukul_island.py --scenes    # generate 10 scenes (~40 min, dev model)
+python gurukul_island.py --tts       # generate narration audio
+python gurukul_island.py --showcase  # assemble MP4
+python gurukul_island.py --all       # full pipeline end-to-end
 ```
 
 Output files land in `output/island_scenes/`, `output/island_audio/`, and `output/probability_island.mp4`.
 
-### Reference scripts (older approaches)
+---
 
-```bash
-# v3: img2img with guru + kid characters (kept for reference)
-python gurukul_v3.py --all
+## TTS: ElevenLabs + Kokoro Fallback
 
-# v2: older attempt (kept for reference)
-python gurukul_v2.py --all
-```
+ElevenLabs is used when `ELEVENLABS_API_KEY` is set in your environment (best quality — Adam voice, multilingual v2). If not set or if the API call fails, it automatically falls back to **Kokoro TTS** — a fully local, free, high-quality neural TTS that runs on CPU/Apple Silicon with no API key required.
+
+---
+
+## Important Notes
+
+> ⚠️ **Never run multiple mflux instances in parallel on Apple Silicon.** They share the Metal GPU and will silently crash each other. Always use sequential generation (the pipeline handles this automatically).
 
 ---
 
 ## Project Structure
 
 ```
-ai_edu/
-├── gurukul_island.py      # BEST — Probability Island style (10 cinematic scenes)
+gurukul-ai/
+├── gurukul_island.py      # Main pipeline — Probability Island style (10 cinematic scenes)
 ├── gurukul_v3.py          # img2img with characters (reference)
 ├── gurukul_v2.py          # older attempt (reference)
 ├── output/                # generated images, audio, video (gitignored)
@@ -151,35 +120,33 @@ ai_edu/
 
 ---
 
-## Notes
-
-**Never run mflux in parallel on Apple Silicon.** Always generate scenes sequentially — one at a time. Parallel runs cause memory spikes that crash the process or produce corrupted outputs.
-
-The pipeline handles this correctly: `gurukul_island.py` loops through scenes one by one in `generate_all_scenes()`.
-
----
-
 ## Roadmap
 
 - [x] Script + scene definitions (Probability Island, 10 scenes)
-- [x] mflux FLUX Dev image generation (cinematic 1360x768)
+- [x] mflux FLUX Dev image generation (cinematic 1360×768)
 - [x] Kokoro TTS narration (am_adam, warm narrator voice)
+- [x] ElevenLabs TTS with automatic Kokoro fallback
 - [x] MoviePy showcase assembly
-- [ ] Wan 2.2 animation — animate each scene image into a short video clip
-- [ ] Background music track
-- [ ] Additional NCERT topics (Fractions, Geometry, Ratios)
-- [ ] Hindi narration voice
+- [ ] Wan 2.2 animation of each scene
+- [ ] More topics: Fractions, Geometry, Algebra
+- [ ] Hindi narration support
+- [ ] YouTube auto-upload
 
 ---
 
 ## Tools Used
 
 | Tool | Purpose | License |
-|---|---|---|
+|------|---------|---------|
 | [mflux](https://github.com/filipstrand/mflux) | FLUX Dev/Schnell image generation on Apple Silicon | MIT |
 | [FLUX.1-Dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) | Image generation model | FLUX Non-Commercial |
-| [Kokoro TTS](https://huggingface.co/hexgrad/Kokoro-82M) | Text-to-speech narration | Apache 2.0 |
+| [ElevenLabs](https://elevenlabs.io) | Cloud TTS — Adam voice, multilingual v2 | Commercial API |
+| [Kokoro TTS](https://huggingface.co/hexgrad/Kokoro-82M) | Local neural TTS narration | Apache 2.0 |
 | [MoviePy](https://zulko.github.io/moviepy/) | Video assembly | MIT |
 | [Wan 2.2](https://github.com/Wan-Video/Wan2.1) | Image-to-video animation (upcoming) | Apache 2.0 |
 
-All tools run **fully locally** — no API keys, no internet required after initial model downloads.
+---
+
+## License
+
+MIT

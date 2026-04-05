@@ -52,8 +52,10 @@ SCENE_DEFS = [
      "lush green trees on top of the cliffs"),
 
     (3,
-     "one giant gold coin spinning and tumbling through the air "
+     "one giant plain gold coin spinning and tumbling through the air "
      "above a sparkling ocean between two cliffs, "
+     "coin has letter H on one face and letter T on the other face, "
+     "NO bitcoin logo, NO cryptocurrency symbol, NO B symbol, plain smooth coin surface, "
      "coin catching the sunlight dramatically mid-spin, "
      "golden rays radiating from the spinning coin, "
      "sea spray below, dramatic sky, sense of suspense and wonder"),
@@ -264,34 +266,72 @@ def generate_all_scenes():
     print("\nAll scenes done!")
 
 
-# ── Kokoro TTS narration ──────────────────────────────────────────────────────
+# ── TTS narration: ElevenLabs (primary) → Kokoro (fallback) ──────────────────
 
-def generate_audio(scene: dict) -> Path:
+# Set ELEVENLABS_API_KEY in your environment to use ElevenLabs.
+# If not set or if generation fails, falls back to local Kokoro TTS automatically.
+ELEVENLABS_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # "Adam" — deep warm male narrator
+
+def _generate_elevenlabs(text: str, out_path: Path) -> bool:
+    """Try ElevenLabs. Returns True on success, False on failure."""
+    import os
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    if not api_key:
+        return False
+    try:
+        from elevenlabs.client import ElevenLabs
+        import soundfile as sf
+
+        client = ElevenLabs(api_key=api_key)
+        audio_gen = client.text_to_speech.convert(
+            voice_id=ELEVENLABS_VOICE_ID,
+            text=text,
+            model_id="eleven_multilingual_v2",
+            output_format="pcm_24000",
+        )
+        pcm = b"".join(audio_gen)
+        audio_np = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        sf.write(str(out_path), audio_np, 24000)
+        print(f"    [ElevenLabs] saved {out_path.name} ({len(audio_np)/24000:.1f}s)")
+        return True
+    except Exception as e:
+        print(f"    [ElevenLabs] failed: {e} — falling back to Kokoro")
+        return False
+
+
+def _generate_kokoro(text: str, out_path: Path):
+    """Kokoro TTS fallback — fully local, no API key needed."""
     from kokoro import KPipeline
     import soundfile as sf
 
+    pipeline = KPipeline(lang_code='a')
+    segments = []
+    silence  = np.zeros(int(0.3 * 24000), dtype=np.float32)
+    for _, _, audio in pipeline(text, voice='am_adam', speed=0.88):
+        segments.append(audio)
+    segments.append(silence)
+    combined = np.concatenate(segments)
+    sf.write(str(out_path), combined, 24000)
+    print(f"    [Kokoro] saved {out_path.name} ({len(combined)/24000:.1f}s)")
+
+
+def generate_audio(scene: dict) -> Path:
     out_path = AUDIO_DIR / f"scene_{scene['id']:02d}.wav"
     if out_path.exists():
         print(f"  Audio cached: {out_path.name}")
         return out_path
 
-    pipeline = KPipeline(lang_code='a')
-    segments = []
-    silence  = np.zeros(int(0.3 * 24000), dtype=np.float32)
-
-    for _, _, audio in pipeline(scene["narration"], voice='am_adam', speed=0.88):
-        segments.append(audio)
-    segments.append(silence)
-
-    combined = np.concatenate(segments)
-    import soundfile as sf
-    sf.write(str(out_path), combined, 24000)
-    print(f"  Audio: {out_path.name} ({len(combined)/24000:.1f}s)")
+    print(f"  Scene {scene['id']:02d} TTS...")
+    text = scene["narration"]
+    if not _generate_elevenlabs(text, out_path):
+        _generate_kokoro(text, out_path)
     return out_path
 
 
 def generate_all_audio():
-    print("Generating narration audio (Kokoro am_adam)...")
+    import os
+    backend = "ElevenLabs" if os.environ.get("ELEVENLABS_API_KEY") else "Kokoro (local)"
+    print(f"Generating narration audio — primary: {backend}, fallback: Kokoro...")
     for scene in SCENES:
         generate_audio(scene)
     print("All audio done!")
