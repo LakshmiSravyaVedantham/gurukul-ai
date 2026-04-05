@@ -1,0 +1,23 @@
+# Generated output — never commit these
+output/
+
+# Image, video, audio artifacts
+*.png
+*.mp4
+*.wav
+
+# Model weights
+*.safetensors
+*.gguf
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+.venv/
+
+# Environment variables
+.env
