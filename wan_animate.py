@@ -300,41 +300,79 @@ def upload_image_to_comfy(image_path: Path) -> str:
     return image_path.name
 
 
-def animate_scene(scene_id: int):
-    out = CLIPS_DIR / f"scene_{scene_id:02d}.mp4"
-    if out.exists():
-        print(f"  Scene {scene_id:02d}: cached")
-        return out
+def _kenburns_fallback(img_path: Path, audio_path: Path, out: Path, scene_id: int):
+    """
+    Fallback: Ken Burns cinematic zoom/pan using ffmpeg only.
+    No model, no GPU — instant. Always works.
+    """
+    import soundfile as sf
+    duration = sf.info(str(audio_path)).duration
+    fps = 25
+    total_frames = int(duration * fps)
+    W, H = 1280, 720
 
-    img_path = SCENES_DIR / f"scene_{scene_id:02d}.png"
-    if not img_path.exists():
-        print(f"  Scene {scene_id:02d}: no image, skip")
+    # Alternate zoom direction per scene
+    zoom_in = (scene_id % 2 == 0)
+    zoom_start, zoom_end = (1.08, 1.0) if zoom_in else (1.0, 1.08)
+    # Gentle horizontal drift
+    pan_end = 40 if (scene_id % 3 != 0) else -40
+
+    nf = str(max(total_frames - 1, 1))
+    z_expr = f"{zoom_start}+({zoom_end}-{zoom_start})*n/{nf}"
+    x_expr = f"(iw-iw/zoom)/2+{pan_end}*n/{nf}"
+    y_expr = "(ih-ih/zoom)/2"
+
+    zp_filter = (
+        f"scale=8000:-1,"
+        f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':"
+        f"d={total_frames}:s={W}x{H}:fps={fps},"
+        f"setsar=1"
+    )
+    cmd = [
+        "ffmpeg", "-y",
+        "-loop", "1", "-i", str(img_path),
+        "-i", str(audio_path),
+        "-vf", zp_filter,
+        "-t", str(duration),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        "-shortest", str(out)
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"    Ken Burns error: {r.stderr[-200:]}")
         return None
+    print(f"    Ken Burns fallback: {out.name} ({out.stat().st_size//1024}KB)")
+    return out
 
+
+def _try_ltxv(scene_id: int, img_path: Path, out: Path):
+    """Try LTX Video via ComfyUI. Returns output path or None on any failure."""
     prompt = ANIMATION_PROMPTS.get(scene_id, "smooth cinematic motion, beautiful scene")
-    audio_path = AUDIO_DIR / f"scene_{scene_id:02d}.wav"
-    audio_duration = 20.0  # default
-    if audio_path.exists():
-        import soundfile as sf
-        info = sf.info(str(audio_path))
-        audio_duration = info.duration
 
-    # LTX: 25fps, step=8. 201 frames = ~8s. Ping-pong gives 16s seamless cycle.
-    num_frames = 201  # 8s clip — snapped to valid LTX step (9 + n*8)
+    # LTX: 25fps, step=8. 201 frames = ~8s clip.
+    num_frames = 201
     num_frames = max(9, ((num_frames - 9) // 8) * 8 + 9)
 
-    print(f"  Animating scene {scene_id:02d} ({num_frames} frames = {num_frames/25:.1f}s) with LTX Video...")
+    try:
+        img_filename = upload_image_to_comfy(img_path)
+    except Exception as e:
+        print(f"    Upload failed: {e}")
+        return None
 
-    img_filename = upload_image_to_comfy(img_path)
     prefix = f"ltxv_s{scene_id:02d}_"
     workflow = _build_ltxv_workflow(img_filename, prompt, num_frames, scene_id)
 
-    # Submit to ComfyUI
-    result = _comfy_post("/prompt", {"prompt": workflow})
-    prompt_id = result["prompt_id"]
-    print(f"    Queued: {prompt_id[:8]}...")
+    try:
+        result = _comfy_post("/prompt", {"prompt": workflow})
+    except Exception as e:
+        print(f"    ComfyUI submit failed: {e}")
+        return None
 
-    # Poll until done
+    prompt_id = result["prompt_id"]
+    print(f"    Queued: {prompt_id[:8]}... ({num_frames} frames = {num_frames/25:.1f}s)")
+
     for _ in range(600):   # max ~30 min
         time.sleep(3)
         try:
@@ -346,26 +384,55 @@ def animate_scene(scene_id: int):
         entry = history[prompt_id]
         status = entry.get("status", {})
         if status.get("status_str") == "error":
-            print(f"    ERROR: {status}")
+            print(f"    LTX error: {status.get('messages', [{}])[-1]}")
             return None
         outputs = entry.get("outputs", {})
         for node_id, node_out in outputs.items():
             if node_out.get("images"):
-                # Frames saved — find them and assemble with ffmpeg
                 frames_dir = COMFYUI_DIR / "output"
                 frames = sorted(frames_dir.glob(f"{prefix}*.png"))
                 if frames:
                     print(f"    Got {len(frames)} frames — assembling MP4...")
                     _frames_to_mp4(frames, out, fps=25)
-                    # Clean up frames
                     for f in frames:
                         f.unlink(missing_ok=True)
                     return out
-        # Still running
         if status.get("completed"):
             break
 
-    print(f"    Timed out waiting for scene {scene_id}")
+    print(f"    LTX timed out for scene {scene_id}")
+    return None
+
+
+def animate_scene(scene_id: int):
+    out = CLIPS_DIR / f"scene_{scene_id:02d}.mp4"
+    if out.exists():
+        print(f"  Scene {scene_id:02d}: cached")
+        return out
+
+    img_path  = SCENES_DIR / f"scene_{scene_id:02d}.png"
+    audio_path = AUDIO_DIR / f"scene_{scene_id:02d}.wav"
+
+    if not img_path.exists():
+        print(f"  Scene {scene_id:02d}: no image, skip")
+        return None
+
+    print(f"  Scene {scene_id:02d}: trying LTX Video...")
+
+    # ── Attempt 1: LTX Video via ComfyUI ─────────────────────────────────────
+    if check_comfyui():
+        result = _try_ltxv(scene_id, img_path, out)
+        if result:
+            return result
+        print(f"  Scene {scene_id:02d}: LTX failed — falling back to Ken Burns")
+    else:
+        print(f"  Scene {scene_id:02d}: ComfyUI not running — using Ken Burns fallback")
+
+    # ── Attempt 2: Ken Burns zoom/pan (ffmpeg, no model needed) ──────────────
+    if audio_path.exists():
+        return _kenburns_fallback(img_path, audio_path, out, scene_id)
+
+    print(f"  Scene {scene_id:02d}: no audio for Ken Burns fallback, skip")
     return None
 
 
@@ -388,9 +455,12 @@ def _frames_to_mp4(frames: list, out: Path, fps: int = 16):
 
 
 def animate_all():
-    if not ensure_comfyui():
-        return
-    print(f"Animating all scenes with Wan 2.2 I2V...")
+    # Try to start ComfyUI, but continue even if it fails (Ken Burns fallback)
+    if not check_comfyui():
+        started = start_comfyui()
+        if not started:
+            print("ComfyUI unavailable — will use Ken Burns fallback for all scenes.")
+    print("Animating all scenes (LTX Video → Ken Burns fallback)...")
     for scene_id in range(1, 11):
         animate_scene(scene_id)
     print("All animations done!")
