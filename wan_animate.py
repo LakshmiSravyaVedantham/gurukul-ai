@@ -37,16 +37,14 @@ ANIMATION_PROMPTS = {
     2:  "gentle ocean waves crash rhythmically against tall golden coin cliffs, "
         "coins gleam in warm sunlight, camera slowly pulls back revealing the full cliffs",
 
-    3:  "gold coin flipping end over end in slow motion, "
-        "coin rotates 360 degrees showing H face then T face alternately, "
-        "the coin spins rapidly on its axis tumbling through golden light, "
-        "each face of the coin clearly visible during the full rotation flip, "
-        "dramatic tumbling motion with light glinting off each side",
+    3:  "gold coin slowly flipping in the air in smooth slow motion, "
+        "one face shows the letter H clearly, then gently rotates to reveal the letter T on the other face, "
+        "steady gentle flip, coin stays centered in frame, "
+        "warm golden light, calm unhurried motion, both H and T faces readable",
 
-    4:  "six giant red dice simultaneously rolling and tumbling across the desert floor, "
-        "each dice rolling to reveal different numbers, dice tumbling with dust clouds, "
-        "dramatic rolling motion, numbers 1 through 6 visible on tumbling faces, "
-        "sand swirling around the rolling dice boulders",
+    4:  "six large red dice gently rocking and slowly rolling in place on desert ground, "
+        "each dice shows its dots face clearly, subtle gentle rocking motion, "
+        "calm steady movement, warm golden desert light, dice stay in position",
 
     5:  "spotlight beam slowly sweeps across dice boulders and locks onto the four-dot face, "
         "golden glow pulses and brightens on the four dots, dramatic cinematic reveal",
@@ -114,7 +112,7 @@ def ensure_comfyui():
 
 # ── LTX Video I2V workflow ────────────────────────────────────────────────────
 
-def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49, scene_id: int = 1, steps: int = 4) -> dict:
+def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49, scene_id: int = 1, steps: int = 4, strength: float = 1.0) -> dict:
     """
     LTX Video 2B distilled I2V workflow.
     Distilled model = only 4 steps. Fast on Apple Silicon MPS.
@@ -155,7 +153,7 @@ def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49,
                 "height": 512,
                 "length": num_frames,
                 "batch_size": 1,
-                "strength": 1.0,
+                "strength": strength,
             }
         },
         "8": {
@@ -361,8 +359,10 @@ def _try_ltxv(scene_id: int, img_path: Path, out: Path):
     num_frames = 201
     num_frames = max(9, ((num_frames - 9) // 8) * 8 + 9)
 
-    # Scenes with complex motion (coin flip, dice roll) get more steps for quality
-    steps = 8 if scene_id in (3, 4) else 4
+    # Scene 3: coin flip — more steps, lower strength to keep image stable
+    # Scene 4: dice — more steps for quality
+    steps    = 8 if scene_id in (3, 4) else 4
+    strength = 0.75 if scene_id == 3 else 1.0
 
     try:
         img_filename = upload_image_to_comfy(img_path)
@@ -371,7 +371,7 @@ def _try_ltxv(scene_id: int, img_path: Path, out: Path):
         return None
 
     prefix = f"ltxv_s{scene_id:02d}_"
-    workflow = _build_ltxv_workflow(img_filename, prompt, num_frames, scene_id, steps=steps)
+    workflow = _build_ltxv_workflow(img_filename, prompt, num_frames, scene_id, steps=steps, strength=strength)
 
     try:
         result = _comfy_post("/prompt", {"prompt": workflow})
