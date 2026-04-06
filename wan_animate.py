@@ -24,7 +24,7 @@ COMFYUI_DIR  = Path("/Volumes/bujji1/sravya/ComfyUI")
 SCENES_DIR   = AI_EDU_DIR / "output" / "island_scenes"
 AUDIO_DIR    = AI_EDU_DIR / "output" / "island_audio"
 CLIPS_DIR    = AI_EDU_DIR / "output" / "island_clips"   # animated video clips
-FINAL_OUT    = AI_EDU_DIR / "output" / "probability_island_animated.mp4"
+FINAL_OUT    = AI_EDU_DIR / "output" / "animated.mp4"
 COMFYUI_URL  = "http://127.0.0.1:8288"
 
 CLIPS_DIR.mkdir(parents=True, exist_ok=True)
@@ -436,6 +436,26 @@ def animate_scene(scene_id: int):
     return None
 
 
+def _make_pingpong(src: Path, out: Path):
+    """Create forward+reverse (ping-pong) MP4 via ffmpeg. No GIF jump at loop point."""
+    rev = src.parent / f"_rev_{src.name}"
+    # Reverse the clip
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(src),
+        "-vf", "reverse", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(rev)
+    ], check=True, capture_output=True)
+    # Concatenate forward + reversed
+    list_file = src.parent / "_pp_list.txt"
+    with open(list_file, "w") as f:
+        f.write(f"file '{src}'\nfile '{rev}'\n")
+    subprocess.run([
+        "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+        "-i", str(list_file), "-c", "copy", str(out)
+    ], check=True, capture_output=True)
+    list_file.unlink(missing_ok=True)
+    rev.unlink(missing_ok=True)
+
+
 def _frames_to_mp4(frames: list, out: Path, fps: int = 16):
     """Assemble PNG frames into MP4 using ffmpeg."""
     # Write frame list
@@ -483,14 +503,14 @@ def assemble_final():
         audio = AudioFileClip(str(audio_path))
 
         if clip_path.exists():
-            video = VideoFileClip(str(clip_path))
+            # Build ping-pong MP4 via ffmpeg (more reliable than moviepy time_mirror)
+            pingpong_path = CLIPS_DIR / f"scene_{scene_id:02d}_pp.mp4"
+            if not pingpong_path.exists():
+                _make_pingpong(clip_path, pingpong_path)
+            video = VideoFileClip(str(pingpong_path))
             if video.duration < audio.duration:
-                # Ping-pong: forward + reverse = seamless loop, no GIF jump
-                from moviepy.editor import vfx, concatenate_videoclips as cat
-                forward  = video
-                backward = video.fx(vfx.time_mirror)
-                cycle    = cat([forward, backward])  # one full cycle
-                video    = cycle.fx(vfx.loop, duration=audio.duration)
+                from moviepy.editor import vfx
+                video = video.fx(vfx.loop, duration=audio.duration)
             else:
                 video = video.subclip(0, audio.duration)
             clip = video.set_audio(audio)
