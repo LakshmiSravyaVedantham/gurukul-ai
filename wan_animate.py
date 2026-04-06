@@ -16,7 +16,7 @@ Run:
     python wan_animate.py --full          # --all + --assemble
 """
 
-import json, time, subprocess, sys, urllib.request, urllib.parse
+import json, time, subprocess, sys, urllib.request, urllib.parse, math, struct, zlib
 from pathlib import Path
 
 AI_EDU_DIR   = Path("/Volumes/bujji1/sravya/ai_edu")
@@ -46,8 +46,11 @@ ANIMATION_PROMPTS = {
         "each dice shows its dots face clearly, subtle gentle rocking motion, "
         "calm steady movement, warm golden desert light, dice stay in position",
 
-    5:  "spotlight beam slowly sweeps across dice boulders and locks onto the four-dot face, "
-        "golden glow pulses and brightens on the four dots, dramatic cinematic reveal",
+    5:  "close-up of one giant red dice boulder, the face showing exactly four white dots arranged in a 2x2 square pattern glowing bright gold, "
+        "spotlight beam locks onto the four-dot face and pulses brighter, "
+        "four dots clearly visible and glowing, NOT three dots NOT five dots, exactly four dots, "
+        "golden glow intensifies on the four white dots, dramatic cinematic reveal, "
+        "dice boulder stays perfectly still, only the four dots glow and pulse",
 
     6:  "magical glowing trees sway gently in an enchanted forest, "
         "red and blue light orbs float softly upward, fireflies drift through golden air",
@@ -304,28 +307,327 @@ def upload_image_to_comfy(image_path: Path) -> str:
     return image_path.name
 
 
+def _find_gold_bbox(arr):
+    """
+    Find bounding box of the gold coin in the image using color.
+    Gold = high red, medium green, low blue. Returns (x1, y1, x2, y2).
+    Falls back to center 50% of frame if not found.
+    """
+    import numpy as np
+    r = arr[:,:,0].astype(float)
+    g = arr[:,:,1].astype(float)
+    b = arr[:,:,2].astype(float)
+    H, W = arr.shape[:2]
+    # Gold/yellow: red>150, green>90, blue<130, red clearly dominant over blue
+    mask = (r > 150) & (g > 90) & (b < 140) & (r > b * 1.3) & (r > g * 0.7)
+    rows = _np_where_1d(mask.any(axis=1))
+    cols = _np_where_1d(mask.any(axis=0))
+    if len(rows) < 10 or len(cols) < 10:
+        # fallback: center 55% of image
+        return (int(W * 0.22), int(H * 0.15), int(W * 0.78), int(H * 0.85))
+    pad = 30
+    return (max(0, cols[0] - pad), max(0, rows[0] - pad),
+            min(W, cols[-1] + pad), min(H, rows[-1] + pad))
+
+
+def _find_red_bboxes(arr, n=6):
+    """
+    Find bounding boxes of n red dice using color clustering.
+    Returns list of (cx, cy, half_w, half_h) per dice sorted left→right.
+    """
+    import numpy as np
+    r = arr[:,:,0].astype(float)
+    g = arr[:,:,1].astype(float)
+    b = arr[:,:,2].astype(float)
+    H, W = arr.shape[:2]
+    # Red dice: strong red, low green, low blue
+    mask = (r > 130) & (g < 120) & (b < 120) & (r > g * 1.2) & (r > b * 1.2)
+    ys, xs = _np_where_2d(mask)
+    if len(xs) < 50:
+        # fallback: evenly divide lower 70% into n columns
+        bboxes = []
+        col_w = W // n
+        for i in range(n):
+            cx = col_w * i + col_w // 2
+            cy = int(H * 0.65)
+            bboxes.append((cx, cy, col_w // 2 - 5, int(H * 0.25)))
+        return bboxes
+    # Cluster into n groups by x-coordinate (sort then split)
+    order = xs.argsort()
+    xs_s, ys_s = xs[order], ys[order]
+    size = len(xs_s) // n
+    bboxes = []
+    for i in range(n):
+        chunk_x = xs_s[i*size:(i+1)*size]
+        chunk_y = ys_s[i*size:(i+1)*size]
+        cx = int(chunk_x.mean())
+        cy = int(chunk_y.mean())
+        hw = max(40, int((chunk_x.max() - chunk_x.min()) / 2) + 20)
+        hh = max(40, int((chunk_y.max() - chunk_y.min()) / 2) + 20)
+        bboxes.append((cx, cy, hw, hh))
+    return sorted(bboxes, key=lambda b: b[0])
+
+
+def _np_where_1d(bool_arr):
+    """Return indices where bool_arr is True (avoids numpy import at module level)."""
+    import numpy as np
+    return np.where(bool_arr)[0]
+
+
+def _np_where_2d(bool_arr):
+    """Return (rows, cols) where bool_arr is True."""
+    import numpy as np
+    return np.where(bool_arr)
+
+
+def _encode_frames(frames_dir: Path, audio_path: Path, out: Path, fps: int = 25):
+    """Encode PNG frame sequence + audio to MP4."""
+    list_file = frames_dir / "frames.txt"
+    n = len(list(frames_dir.glob("f?????.png")))
+    with open(list_file, "w") as f:
+        for i in range(n):
+            f.write(f"file 'f{i:05d}.png'\nduration {1/fps:.6f}\n")
+    cmd = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0", "-i", str(list_file),
+        "-i", str(audio_path),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "192k",
+        "-shortest", str(out)
+    ]
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=str(frames_dir))
+    return r
+
+
+def _coin_flip_animation(img_path: Path, audio_path: Path, out: Path):
+    """
+    Programmatic coin flip.
+    - Background plate: coin region erased via per-scanline left↔right interpolation
+      (natural sky/ocean fill, not a flat blob).
+    - Front face: the coin as rendered in the image (H side).
+    - Back face: plain smooth gold gradient (no markings).
+    - No elliptical masks — straightforward bounding-box compositing.
+    """
+    try:
+        from PIL import Image
+        import numpy as np
+        import soundfile as sf
+        import shutil
+    except ImportError:
+        return None
+
+    duration = sf.info(str(audio_path)).duration
+    fps = 25
+    W, H = 1280, 720
+    flip_period = 1.5
+    total_frames = int(duration * fps)
+
+    src     = Image.open(str(img_path)).convert("RGB").resize((W, H), Image.LANCZOS)
+    src_arr = np.array(src)
+
+    # ── Coin location ─────────────────────────────────────────────────────────
+    coin_cx = int(W * 0.50)
+    coin_cy = int(H * 0.40)
+    coin_rx = int(W * 0.22)
+    coin_ry = int(H * 0.32)
+
+    # ── Background plate: erase coin via per-row scanline interpolation ───────
+    # For each row that intersects the coin ellipse, interpolate linearly between
+    # the pixels just to the LEFT and RIGHT of the coin edge on that row.
+    # This gives natural sky/ocean fill rather than a flat colour blob.
+    bg_arr = src_arr.copy()
+    for y in range(H):
+        dy_norm = (y - coin_cy) / coin_ry
+        if abs(dy_norm) >= 1.0:
+            continue
+        dx_half = int(coin_rx * math.sqrt(max(0.0, 1.0 - dy_norm ** 2)))
+        xl = coin_cx - dx_half      # left edge of coin on this row
+        xr = coin_cx + dx_half      # right edge
+        # Sample just outside the coin edge (clipped to frame)
+        left_col  = src_arr[y, max(0, xl - 2)].astype(float)
+        right_col = src_arr[y, min(W - 1, xr + 2)].astype(float)
+        x0 = max(0, xl);  x1 = min(W, xr)
+        n  = x1 - x0
+        if n <= 0:
+            continue
+        t = np.linspace(0.0, 1.0, n)
+        bg_arr[y, x0:x1] = (left_col * (1 - t[:, None]) +
+                             right_col * t[:, None]).astype(np.uint8)
+    bg = Image.fromarray(bg_arr)
+
+    # ── Coin bounding box (for patch operations) ──────────────────────────────
+    ex1 = max(0, coin_cx - coin_rx)
+    ex2 = min(W, coin_cx + coin_rx)
+    ey1 = max(0, coin_cy - coin_ry)
+    ey2 = min(H, coin_cy + coin_ry)
+    patch_w = ex2 - ex1
+    patch_h = ey2 - ey1
+
+    # ── Front face: crop coin from source ─────────────────────────────────────
+    coin_front = src.crop((ex1, ey1, ex2, ey2))
+
+    # ── Back face: plain smooth gold radial gradient ──────────────────────────
+    py_g, px_g = np.mgrid[0:patch_h, 0:patch_w]
+    pd = np.sqrt(((px_g - patch_w / 2) / max(1, patch_w / 2)) ** 2 +
+                 ((py_g - patch_h / 2) / max(1, patch_h / 2)) ** 2)
+    r_ch = (240 - 60 * pd).clip(0, 255).astype(np.uint8)
+    g_ch = (200 - 60 * pd).clip(0, 255).astype(np.uint8)
+    b_ch = ( 60 - 30 * pd).clip(0, 255).astype(np.uint8)
+    back_arr = np.stack([r_ch, g_ch, b_ch], axis=2)
+    coin_back = Image.fromarray(back_arr)
+
+    frames_dir = out.parent / f"_cf_frames_{out.stem}"
+    frames_dir.mkdir(exist_ok=True)
+
+    for i in range(total_frames):
+        t_sec   = i / fps
+        phase   = (t_sec % flip_period) / flip_period * 2 * math.pi
+        cos_val = math.cos(phase)
+        scale_x = max(0.01, abs(cos_val))
+        use_back = (cos_val < 0)
+
+        face  = coin_back if use_back else coin_front
+        new_w = max(1, int(patch_w * scale_x))
+        squeezed = face.resize((new_w, patch_h), Image.LANCZOS)
+
+        # Always start from the clean bg (coin already erased)
+        frame = bg.copy()
+        # Paste squeezed face centred horizontally in the coin bounding box
+        frame.paste(squeezed, (ex1 + (patch_w - new_w) // 2, ey1))
+        frame.save(str(frames_dir / f"f{i:05d}.png"))
+
+    r = _encode_frames(frames_dir, audio_path, out, fps)
+    shutil.rmtree(str(frames_dir), ignore_errors=True)
+    if r.returncode != 0:
+        print(f"    Coin flip encode error: {r.stderr[-200:]}")
+        return None
+    print(f"    Coin flip animation: {out.name} ({out.stat().st_size//1024}KB)")
+    return out
+
+
+def _dice_roll_animation(img_path: Path, audio_path: Path, out: Path):
+    """
+    Programmatic dice rolling: each dice slides left↔right + bounces vertically.
+    Dice shape is NEVER distorted — pure 2D translation only, no rotation.
+    Background stays perfectly static. Each dice rolls at a staggered phase.
+    """
+    try:
+        from PIL import Image
+        import numpy as np
+        import soundfile as sf
+        import shutil
+    except ImportError:
+        return None
+
+    duration = sf.info(str(audio_path)).duration
+    fps = 25
+    W, H = 1280, 720
+    roll_period = 2.0   # seconds per left↔right roll cycle
+    max_slide   = 12    # pixels horizontal travel
+    max_bounce  = 6     # pixels vertical bounce (up only, twice per cycle)
+
+    src     = Image.open(str(img_path)).convert("RGB").resize((W, H), Image.LANCZOS)
+    src_arr = np.array(src)
+    total_frames = int(duration * fps)
+
+    bboxes = _find_red_bboxes(src_arr, n=6)
+    print(f"    Found {len(bboxes)} dice regions")
+
+    # Pre-extract each dice patch once — shape never changes
+    pad = 4
+    patches, rects = [], []
+    for (cx, cy, hw, hh) in bboxes:
+        rx1 = max(0, cx - hw - pad);  rx2 = min(W, cx + hw + pad)
+        ry1 = max(0, cy - hh - pad);  ry2 = min(H, cy + hh + pad)
+        patches.append(src_arr[ry1:ry2, rx1:rx2].copy())
+        rects.append((rx1, ry1, rx2, ry2))
+
+    frames_dir = out.parent / f"_dr_frames_{out.stem}"
+    frames_dir.mkdir(exist_ok=True)
+
+    for i in range(total_frames):
+        t = i / fps
+        frame_arr = src_arr.copy()   # fresh static background each frame
+
+        for di, ((rx1, ry1, rx2, ry2), patch) in enumerate(zip(rects, patches)):
+            phase = 2 * math.pi * t / roll_period + di * math.pi / 3
+
+            # Horizontal slide (left↔right)
+            dx = int(max_slide * math.sin(phase))
+            # Vertical bounce: abs(sin(2*phase)) → bounces twice per roll cycle, always upward
+            dy = -int(max_bounce * abs(math.sin(2 * phase)))
+
+            ph, pw = patch.shape[:2]
+
+            # Translate destination box
+            dx1 = rx1 + dx;  dx2 = rx2 + dx
+            dy1 = ry1 + dy;  dy2 = ry2 + dy
+
+            # Clip to frame and adjust source slice accordingly
+            cdx1 = max(0, dx1);  cdx2 = min(W, dx2)
+            cdy1 = max(0, dy1);  cdy2 = min(H, dy2)
+            sx1  = cdx1 - dx1;   sx2  = sx1 + (cdx2 - cdx1)
+            sy1  = cdy1 - dy1;   sy2  = sy1 + (cdy2 - cdy1)
+
+            if cdx2 > cdx1 and cdy2 > cdy1 and sx2 <= pw and sy2 <= ph and sx1 >= 0 and sy1 >= 0:
+                frame_arr[cdy1:cdy2, cdx1:cdx2] = patch[sy1:sy2, sx1:sx2]
+
+        Image.fromarray(frame_arr).save(str(frames_dir / f"f{i:05d}.png"))
+
+    r = _encode_frames(frames_dir, audio_path, out, fps)
+    shutil.rmtree(str(frames_dir), ignore_errors=True)
+    if r.returncode != 0:
+        print(f"    Dice roll encode error: {r.stderr[-200:]}")
+        return None
+    print(f"    Dice roll animation: {out.name} ({out.stat().st_size//1024}KB)")
+    return out
+
+
 def _kenburns_fallback(img_path: Path, audio_path: Path, out: Path, scene_id: int):
     """
-    Fallback: Ken Burns cinematic zoom/pan using ffmpeg only.
+    Ken Burns cinematic zoom/pan using ffmpeg only.
     No model, no GPU — instant. Always works.
+    Scene-specific motion for maximum cinematic impact.
     """
     import soundfile as sf
     duration = sf.info(str(audio_path)).duration
     fps = 25
     total_frames = int(duration * fps)
     W, H = 1280, 720
-
-    # Alternate zoom direction per scene
-    zoom_in = (scene_id % 2 == 0)
-    zoom_start, zoom_end = (1.08, 1.0) if zoom_in else (1.0, 1.08)
-    # Gentle horizontal drift
-    pan_end = 40 if (scene_id % 3 != 0) else -40
-
     nf = str(max(total_frames - 1, 1))
-    z_expr = f"{zoom_start}+({zoom_end}-{zoom_start})*n/{nf}"
-    x_expr = f"(iw-iw/zoom)/2+{pan_end}*n/{nf}"
-    y_expr = "(ih-ih/zoom)/2"
 
+    # Scene-specific cinematic motion
+    # fmt: zoom_start, zoom_end, x_expr, y_expr
+    SCENE_MOTION = {
+        # Scene 3 (coin flip): dramatic push-in to centre of coin, no horizontal drift
+        3: (1.0, 1.30,
+            "(iw-iw/zoom)/2",
+            "(ih-ih/zoom)/2"),
+        # Scene 4 (dice plains): slow epic pan left→right across the plains, slight zoom
+        4: (1.05, 1.10,
+            f"(iw-iw/zoom)/2-60+120*n/{nf}",
+            "(ih-ih/zoom)/2"),
+        # Scene 5 (spotlight dice): zoom into the glowing face
+        5: (1.0, 1.25,
+            "(iw-iw/zoom)/2",
+            "(ih-ih/zoom)/2"),
+        # Scene 9 (impossible shore): slow ominous push-in
+        9: (1.0, 1.20,
+            "(iw-iw/zoom)/2",
+            "(ih-ih/zoom)/2"),
+    }
+
+    if scene_id in SCENE_MOTION:
+        zoom_start, zoom_end, x_expr, y_expr = SCENE_MOTION[scene_id]
+    else:
+        # Default: alternate zoom in/out + gentle drift
+        zoom_in = (scene_id % 2 == 0)
+        zoom_start, zoom_end = (1.08, 1.0) if zoom_in else (1.0, 1.08)
+        pan_end = 40 if (scene_id % 3 != 0) else -40
+        x_expr = f"(iw-iw/zoom)/2+{pan_end}*n/{nf}"
+        y_expr = "(ih-ih/zoom)/2"
+
+    z_expr = f"{zoom_start}+({zoom_end}-{zoom_start})*n/{nf}"
     zp_filter = (
         f"scale=8000:-1,"
         f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':"
@@ -347,7 +649,7 @@ def _kenburns_fallback(img_path: Path, audio_path: Path, out: Path, scene_id: in
     if r.returncode != 0:
         print(f"    Ken Burns error: {r.stderr[-200:]}")
         return None
-    print(f"    Ken Burns fallback: {out.name} ({out.stat().st_size//1024}KB)")
+    print(f"    Ken Burns: {out.name} ({out.stat().st_size//1024}KB)")
     return out
 
 
@@ -360,9 +662,9 @@ def _try_ltxv(scene_id: int, img_path: Path, out: Path):
     num_frames = max(9, ((num_frames - 9) // 8) * 8 + 9)
 
     # Scene 3: coin flip — more steps, lower strength to keep image stable
-    # Scene 4: dice — more steps for quality
-    steps    = 8 if scene_id in (3, 4) else 4
-    strength = 0.75 if scene_id == 3 else 1.0
+    # Scene 4/5: dice — more steps for quality; scene 5 lower strength to preserve 4-dot face
+    steps    = 8 if scene_id in (3, 4, 5) else 4
+    strength = 0.75 if scene_id in (3, 5) else 1.0
 
     try:
         img_filename = upload_image_to_comfy(img_path)
@@ -411,6 +713,12 @@ def _try_ltxv(scene_id: int, img_path: Path, out: Path):
 
     print(f"    LTX timed out for scene {scene_id}")
     return None
+
+
+# Scenes where LTX Video produces poor results (specific object physics like
+# coin flipping / dice rolling). Use Ken Burns cinematic zoom instead — it
+# looks more professional and is completely reliable.
+FORCE_KENBURNS = {3, 4}
 
 
 def animate_scene(scene_id: int):

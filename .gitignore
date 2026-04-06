@@ -1,5 +1,6 @@
-# Generated output — never commit these
+# Generated output — never commit these (except the final demo video)
 output/
+!output/animated.mp4
 
 # Image, video, audio artifacts
 *.png

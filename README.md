@@ -1,5 +1,7 @@
 # Gurukul AI — Kids Educational Video Pipeline
 
+> **Note:** This pipeline uses base models as a starting point. Many more models need to be tested and integrated to improve quality across image generation, animation, and voice synthesis.
+
 ```mermaid
 flowchart TD
     A[📝 Scene Definitions\nnarration script · 10 scenes] --> B
@@ -27,6 +29,10 @@ flowchart TD
 
     I --> J[📹 animated.mp4]
 ```
+
+## Demo
+
+🎬 **[Watch animated.mp4](https://github.com/LakshmiSravyaVedantham/gurukul-ai/blob/main/output/animated.mp4)**
 
 ## Setup
 
@@ -58,3 +64,16 @@ Static version (no ComfyUI needed):
 ```bash
 python gurukul_island.py --showcase
 ```
+
+## Models Used
+
+| Stage | Model | Notes |
+|-------|-------|-------|
+| Image generation | FLUX Dev (mflux) | Apple Silicon MLX, sequential only |
+| Animation | LTX Video 2B Distilled FP8 | 4 steps, image-to-video via ComfyUI |
+| TTS (primary) | ElevenLabs Daniel | Cloud, requires API key |
+| TTS (fallback) | Kokoro am_adam | Fully local, free |
+
+> These are base models chosen for speed and local compatibility on Apple Silicon.
+> Many more models remain to be tested — better animation models (Wan 2.1, CogVideoX, etc.),
+> higher-quality TTS, and improved image generators could significantly raise output quality.

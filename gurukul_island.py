@@ -109,11 +109,13 @@ SCENE_DEFS = [
 
     (9,
      "dramatic rocky shore at the edge of the island, "
-     "one giant red dice boulder with a carved stone seven on its face, "
-     "thick red vines growing over the seven in an X shape, "
-     "mist and dark stormy clouds on this side, "
-     "the impossible shore, "
-     "contrast with the warm sunny island behind it"),
+     "one giant red dice boulder with the large numeral 7 deeply engraved on its face, "
+     "the number 7 carved clearly into the red stone face, "
+     "thick red vines forming an X crossing over the 7, "
+     "cracked and broken stone around the impossible face, "
+     "dark stormy mist and thunderclouds on this side of the island, "
+     "warm sunny golden island visible in the far background, "
+     "eerie contrast between dark impossible shore and bright magical island"),
 
     (10,
      "breathtaking wide aerial view of the entire magical probability island at triumphant golden sunset, "
