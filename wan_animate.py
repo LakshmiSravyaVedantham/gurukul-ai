@@ -113,23 +113,48 @@ def ensure_comfyui():
         return True
     return start_comfyui()
 
+# ── Model availability ────────────────────────────────────────────────────────
+
+LTX_13B  = "ltxv-13b-0.9.7-dev-fp8.safetensors"
+LTX_2B   = "ltxv-2b-0.9.8-distilled-fp8.safetensors"
+WAN_FUN  = "wan2.1_fun_inp_1.3B_bf16.safetensors"
+
+def _ltxv_model_name() -> str:
+    """Return the best available LTX model: 13B > 2B."""
+    p13 = COMFYUI_DIR / "models" / "checkpoints" / LTX_13B
+    return LTX_13B if p13.exists() else LTX_2B
+
+def _wan_fun_available() -> bool:
+    p = COMFYUI_DIR / "models" / "diffusion_models" / WAN_FUN
+    return p.exists()
+
+
 # ── LTX Video I2V workflow ────────────────────────────────────────────────────
 
-def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49, scene_id: int = 1, steps: int = 4, strength: float = 1.0) -> dict:
+def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49,
+                         scene_id: int = 1, steps: int = None, strength: float = 1.0) -> dict:
     """
-    LTX Video 2B distilled I2V workflow.
-    Distilled model = only 4 steps. Fast on Apple Silicon MPS.
-    Flow: LoadImage → CLIPTextEncode → LTXVImgToVideo → LTXVConditioning
-          → LTXVScheduler → KSampler → VAEDecode → SaveImage
+    LTX Video I2V workflow — works for both 2B distilled and 13B dev.
+    13B dev: needs more steps (20-30). 2B distilled: 4 steps.
+    MPS constraint for 13B: frames must satisfy (n-1) % 8 == 0.
     """
-    # frames: min 9, step 8. 49 frames = ~2s at 25fps
+    model = _ltxv_model_name()
+    is_13b = (model == LTX_13B)
+
+    # Frame count: must satisfy (n-9) % 8 == 0. 13B: cap at 97 frames (3.9s) for MPS stability.
     num_frames = max(9, ((num_frames - 9) // 8) * 8 + 9)
+    if is_13b:
+        num_frames = min(num_frames, 97)   # 97 frames = 3.9s, safe on MPS
+
+    if steps is None:
+        steps = 20 if is_13b else 4        # 13B dev needs more steps than distilled
+
     prefix = f"ltxv_s{scene_id:02d}_"
+    print(f"    Using {model} | {num_frames} frames | {steps} steps")
 
     return {
         "1": {"class_type": "LoadImage", "inputs": {"image": image_filename}},
-        # CheckpointLoaderSimple loads model[0] + clip[1] + vae[2] from the bundled file
-        "2": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": "ltxv-2b-0.9.8-distilled-fp8.safetensors"}},
+        "2": {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": model}},
         "3": {"class_type": "CLIPLoader", "inputs": {"clip_name": "t5xxl_fp8_e4m3fn.safetensors", "type": "ltxv"}},
         "5": {
             "class_type": "CLIPTextEncode",
@@ -181,9 +206,69 @@ def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49,
                 "latent_image": ["7", 2],
             }
         },
-        # Steps also passed to KSamplerSelect via sigmas above
         "15": {"class_type": "VAEDecode", "inputs": {"samples": ["14", 0], "vae": ["2", 2]}},
         "12": {"class_type": "SaveImage", "inputs": {"images": ["15", 0], "filename_prefix": prefix}},
+    }
+
+
+def _build_wan_fun_workflow(image_filename: str, prompt: str,
+                             scene_id: int = 1, num_frames: int = 81) -> dict:
+    """
+    Wan 2.1 Fun InP 1.3B I2V workflow.
+    Takes a start image and animates it. The 1.3B model runs on MPS with CPU fallback.
+    num_frames: must satisfy (n-1) % 4 == 0. Default 81 = ~3.2s at 25fps.
+    Uses UMT5 text encoder + Wan 2.1 VAE + CLIP Vision H.
+    """
+    num_frames = max(5, ((num_frames - 1) // 4) * 4 + 1)
+    prefix = f"wan_fun_s{scene_id:02d}_"
+
+    return {
+        "1":  {"class_type": "LoadImage", "inputs": {"image": image_filename}},
+        "2":  {"class_type": "UNETLoader",
+               "inputs": {"unet_name": WAN_FUN, "weight_dtype": "default"}},
+        "3":  {"class_type": "CLIPLoader",
+               "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+                          "type": "wan", "device": "default"}},
+        "4":  {"class_type": "CLIPVisionLoader",
+               "inputs": {"clip_name": "clip_vision_h.safetensors"}},
+        "5":  {"class_type": "VAELoader",
+               "inputs": {"vae_name": "wan_2.1_vae.safetensors"}},
+        "6":  {"class_type": "CLIPVisionEncode",
+               "inputs": {"clip_vision": ["4", 0], "image": ["1", 0], "crop": "center"}},
+        "7":  {"class_type": "CLIPTextEncode",
+               "inputs": {"text": prompt + ", smooth motion, high quality, cinematic",
+                          "clip": ["3", 0]}},
+        "8":  {"class_type": "CLIPTextEncode",
+               "inputs": {"text": "blurry, distorted, low quality, ugly, static",
+                          "clip": ["3", 0]}},
+        "9":  {"class_type": "WanFunInpaintToVideo",
+               "inputs": {
+                   "positive": ["7", 0],
+                   "negative": ["8", 0],
+                   "vae": ["5", 0],
+                   "width": 832, "height": 480,
+                   "length": num_frames,
+                   "batch_size": 1,
+                   "clip_vision_output": ["6", 0],
+                   "start_image": ["1", 0],
+               }},
+        "10": {"class_type": "KSampler",
+               "inputs": {
+                   "model": ["2", 0],
+                   "positive": ["9", 0],
+                   "negative": ["9", 1],
+                   "latent_image": ["9", 2],
+                   "seed": 42 + scene_id,
+                   "steps": 20,
+                   "cfg": 5.0,
+                   "sampler_name": "euler",
+                   "scheduler": "linear_quadratic",
+                   "denoise": 1.0,
+               }},
+        "11": {"class_type": "VAEDecode",
+               "inputs": {"samples": ["10", 0], "vae": ["5", 0]}},
+        "12": {"class_type": "SaveImage",
+               "inputs": {"images": ["11", 0], "filename_prefix": prefix}},
     }
 
 
@@ -715,10 +800,65 @@ def _try_ltxv(scene_id: int, img_path: Path, out: Path):
     return None
 
 
-# Scenes where LTX Video produces poor results (specific object physics like
-# coin flipping / dice rolling). Use Ken Burns cinematic zoom instead — it
-# looks more professional and is completely reliable.
-FORCE_KENBURNS = {3, 4}
+def _try_wan_fun(scene_id: int, img_path: Path, out: Path):
+    """
+    Try Wan 2.1 Fun InP 1.3B for scenes that need controlled start-frame motion.
+    Better than LTX for specific object animation (coin flip, dice).
+    Falls back gracefully if model not downloaded or ComfyUI errors.
+    """
+    if not _wan_fun_available():
+        return None
+
+    prompt = ANIMATION_PROMPTS.get(scene_id, "smooth cinematic motion")
+    num_frames = 81   # 3.2s at 25fps — safe for Wan 1.3B on MPS
+
+    try:
+        img_filename = upload_image_to_comfy(img_path)
+    except Exception as e:
+        print(f"    Upload failed: {e}")
+        return None
+
+    prefix = f"wan_fun_s{scene_id:02d}_"
+    workflow = _build_wan_fun_workflow(img_filename, prompt, scene_id, num_frames)
+
+    try:
+        result = _comfy_post("/prompt", {"prompt": workflow})
+    except Exception as e:
+        print(f"    Wan Fun submit failed: {e}")
+        return None
+
+    prompt_id = result["prompt_id"]
+    print(f"    Wan Fun queued: {prompt_id[:8]}... ({num_frames} frames = {num_frames/25:.1f}s)")
+
+    for _ in range(600):
+        time.sleep(3)
+        try:
+            history = _comfy_get(f"/history/{prompt_id}")
+        except Exception:
+            continue
+        if prompt_id not in history:
+            continue
+        entry = history[prompt_id]
+        status = entry.get("status", {})
+        if status.get("status_str") == "error":
+            print(f"    Wan Fun error: {status.get('messages', [{}])[-1]}")
+            return None
+        outputs = entry.get("outputs", {})
+        for node_id, node_out in outputs.items():
+            if node_out.get("images"):
+                frames_dir = COMFYUI_DIR / "output"
+                frames = sorted(frames_dir.glob(f"{prefix}*.png"))
+                if frames:
+                    print(f"    Got {len(frames)} frames — assembling MP4...")
+                    _frames_to_mp4(frames, out, fps=25)
+                    for f in frames:
+                        f.unlink(missing_ok=True)
+                    return out
+        if status.get("completed"):
+            break
+
+    print(f"    Wan Fun timed out for scene {scene_id}")
+    return None
 
 
 def animate_scene(scene_id: int):
@@ -727,29 +867,40 @@ def animate_scene(scene_id: int):
         print(f"  Scene {scene_id:02d}: cached")
         return out
 
-    img_path  = SCENES_DIR / f"scene_{scene_id:02d}.png"
-    audio_path = AUDIO_DIR / f"scene_{scene_id:02d}.wav"
+    img_path   = SCENES_DIR / f"scene_{scene_id:02d}.png"
+    audio_path = AUDIO_DIR  / f"scene_{scene_id:02d}.wav"
 
     if not img_path.exists():
         print(f"  Scene {scene_id:02d}: no image, skip")
         return None
 
-    print(f"  Scene {scene_id:02d}: trying LTX Video...")
+    if not check_comfyui():
+        print(f"  Scene {scene_id:02d}: ComfyUI not running — using Ken Burns fallback")
+        if audio_path.exists():
+            return _kenburns_fallback(img_path, audio_path, out, scene_id)
+        return None
 
-    # ── Attempt 1: LTX Video via ComfyUI ─────────────────────────────────────
-    if check_comfyui():
-        result = _try_ltxv(scene_id, img_path, out)
+    # ── Scenes 3 & 4: try Wan 2.1 Fun InP first (better object motion) ───────
+    if scene_id in (3, 4) and _wan_fun_available():
+        print(f"  Scene {scene_id:02d}: trying Wan 2.1 Fun InP 1.3B (better for object motion)...")
+        result = _try_wan_fun(scene_id, img_path, out)
         if result:
             return result
-        print(f"  Scene {scene_id:02d}: LTX failed — falling back to Ken Burns")
-    else:
-        print(f"  Scene {scene_id:02d}: ComfyUI not running — using Ken Burns fallback")
+        print(f"  Scene {scene_id:02d}: Wan Fun failed — falling back to LTX Video")
 
-    # ── Attempt 2: Ken Burns zoom/pan (ffmpeg, no model needed) ──────────────
+    # ── All scenes: LTX Video (13B if available, else 2B) ────────────────────
+    model = _ltxv_model_name()
+    print(f"  Scene {scene_id:02d}: trying LTX Video ({model})...")
+    result = _try_ltxv(scene_id, img_path, out)
+    if result:
+        return result
+    print(f"  Scene {scene_id:02d}: LTX failed — using Ken Burns fallback")
+
+    # ── Last resort: Ken Burns zoom/pan ──────────────────────────────────────
     if audio_path.exists():
         return _kenburns_fallback(img_path, audio_path, out, scene_id)
 
-    print(f"  Scene {scene_id:02d}: no audio for Ken Burns fallback, skip")
+    print(f"  Scene {scene_id:02d}: no audio, skip")
     return None
 
 
@@ -797,7 +948,9 @@ def animate_all():
         started = start_comfyui()
         if not started:
             print("ComfyUI unavailable — will use Ken Burns fallback for all scenes.")
-    print("Animating all scenes (LTX Video → Ken Burns fallback)...")
+    ltx = _ltxv_model_name()
+    wan = "Wan 2.1 Fun InP" if _wan_fun_available() else "not available"
+    print(f"Animating all scenes | LTX: {ltx} | Wan Fun InP: {wan} | fallback: Ken Burns")
     for scene_id in range(1, 11):
         animate_scene(scene_id)
     print("All animations done!")
