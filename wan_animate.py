@@ -27,6 +27,12 @@ CLIPS_DIR    = AI_EDU_DIR / "output" / "island_clips"   # animated video clips
 FINAL_OUT    = AI_EDU_DIR / "output" / "animated.mp4"
 COMFYUI_URL  = "http://127.0.0.1:8288"
 
+# ── MLX-native video generation (Apple Silicon, no ComfyUI needed) ───────────
+MLX_VENV_PYTHON = "/Volumes/bujji1/sravya/ai_vidgen/venv/bin/python"
+# prince-canuma/LTX-2-distilled = pre-converted MLX weights (~14 GB, fits in 36 GB)
+# Lightricks/LTX-2               = original PyTorch weights (mlx-video converts on load)
+MLX_MODEL_REPO  = "prince-canuma/LTX-2-distilled"
+
 CLIPS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Animation prompts — describe the MOTION for each scene ───────────────────
@@ -115,7 +121,7 @@ def ensure_comfyui():
 
 # ── Model availability ────────────────────────────────────────────────────────
 
-LTX_13B  = "ltxv-13b-0.9.7-dev-fp8.safetensors"
+LTX_13B  = "ltxv-13b-0.9.8-distilled-fp8.safetensors"
 LTX_2B   = "ltxv-2b-0.9.8-distilled-fp8.safetensors"
 WAN_FUN  = "wan2.1_fun_inp_1.3B_bf16.safetensors"
 
@@ -147,7 +153,7 @@ def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49,
         num_frames = min(num_frames, 97)   # 97 frames = 3.9s, safe on MPS
 
     if steps is None:
-        steps = 20 if is_13b else 4        # 13B dev needs more steps than distilled
+        steps = 8 if is_13b else 4         # 13B distilled: 8 steps for quality; 2B distilled: 4
 
     prefix = f"ltxv_s{scene_id:02d}_"
     print(f"    Using {model} | {num_frames} frames | {steps} steps")
@@ -861,6 +867,84 @@ def _try_wan_fun(scene_id: int, img_path: Path, out: Path):
     return None
 
 
+def _mlx_available() -> bool:
+    """True if mlx-video venv exists."""
+    return Path(MLX_VENV_PYTHON).exists()
+
+
+def _try_mlx_video(scene_id: int, img_path: Path, out: Path):
+    """
+    MLX-native LTX-2 distilled video generation via mlx-video library.
+    Runs in the mflux venv (python 3.11 + mlx-video installed).
+    No ComfyUI needed — pure Apple Silicon MLX execution.
+    Returns output path on success, None on any failure.
+    """
+    if not _mlx_available():
+        return None
+
+    prompt = ANIMATION_PROMPTS.get(scene_id, "smooth cinematic motion, beautiful scene")
+    full_prompt = prompt + ", smooth cinematic motion, high quality, cinematic, beautiful"
+    neg_prompt  = "blurry, static, ugly, distorted, low quality, watermark, jitter"
+
+    # 97 frames at 24fps = ~4s. LTX-2 distilled works well at 8 steps.
+    num_frames = 97
+    steps      = 8
+
+    # Inline Python script executed in the mflux venv
+    script = f"""
+import sys
+try:
+    from mlx_video.models.ltx_2.generate import generate_video, PipelineType
+except ImportError as e:
+    print(f"mlx_video import error: {{e}}", flush=True)
+    sys.exit(1)
+
+try:
+    generate_video(
+        model_repo={MLX_MODEL_REPO!r},
+        text_encoder_repo=None,
+        prompt={full_prompt!r},
+        pipeline=PipelineType.DISTILLED,
+        negative_prompt={neg_prompt!r},
+        height=480,
+        width=832,
+        num_frames={num_frames},
+        num_inference_steps={steps},
+        seed={42 + scene_id},
+        fps=24,
+        output_path={str(out)!r},
+        image={str(img_path)!r},
+        image_strength=1.0,
+        image_frame_idx=0,
+        verbose=True,
+    )
+    print("MLX generation complete", flush=True)
+except Exception as e:
+    print(f"MLX generation failed: {{e}}", flush=True)
+    sys.exit(1)
+"""
+
+    print(f"    MLX LTX-2 distilled ({MLX_MODEL_REPO}): {num_frames} frames @ 24fps, {steps} steps...")
+    try:
+        result = subprocess.run(
+            [MLX_VENV_PYTHON, "-c", script],
+            timeout=3600,   # 60 min max
+        )
+        if result.returncode == 0 and out.exists() and out.stat().st_size > 10_000:
+            print(f"    MLX done: {out.name} ({out.stat().st_size//1024}KB)")
+            return out
+        print(f"    MLX failed (returncode={result.returncode})")
+        if out.exists():
+            out.unlink(missing_ok=True)
+        return None
+    except subprocess.TimeoutExpired:
+        print(f"    MLX timed out for scene {scene_id}")
+        return None
+    except Exception as e:
+        print(f"    MLX error: {e}")
+        return None
+
+
 def animate_scene(scene_id: int):
     out = CLIPS_DIR / f"scene_{scene_id:02d}.mp4"
     if out.exists():
@@ -874,21 +958,29 @@ def animate_scene(scene_id: int):
         print(f"  Scene {scene_id:02d}: no image, skip")
         return None
 
+    # ── 1. MLX-native LTX-2 (best quality, no ComfyUI needed) ───────────────
+    if _mlx_available():
+        print(f"  Scene {scene_id:02d}: trying MLX LTX-2 distilled (native Apple Silicon)...")
+        result = _try_mlx_video(scene_id, img_path, out)
+        if result:
+            return result
+        print(f"  Scene {scene_id:02d}: MLX failed — falling back to ComfyUI")
+
     if not check_comfyui():
         print(f"  Scene {scene_id:02d}: ComfyUI not running — using Ken Burns fallback")
         if audio_path.exists():
             return _kenburns_fallback(img_path, audio_path, out, scene_id)
         return None
 
-    # ── Scenes 3 & 4: try Wan 2.1 Fun InP first (better object motion) ───────
+    # ── 2. Wan 2.1 Fun InP (ComfyUI, controlled object motion) ──────────────
     if scene_id in (3, 4) and _wan_fun_available():
-        print(f"  Scene {scene_id:02d}: trying Wan 2.1 Fun InP 1.3B (better for object motion)...")
+        print(f"  Scene {scene_id:02d}: trying Wan 2.1 Fun InP 1.3B...")
         result = _try_wan_fun(scene_id, img_path, out)
         if result:
             return result
         print(f"  Scene {scene_id:02d}: Wan Fun failed — falling back to LTX Video")
 
-    # ── All scenes: LTX Video (13B if available, else 2B) ────────────────────
+    # ── 3. LTX Video via ComfyUI (13B if available, else 2B) ─────────────────
     model = _ltxv_model_name()
     print(f"  Scene {scene_id:02d}: trying LTX Video ({model})...")
     result = _try_ltxv(scene_id, img_path, out)
@@ -896,7 +988,7 @@ def animate_scene(scene_id: int):
         return result
     print(f"  Scene {scene_id:02d}: LTX failed — using Ken Burns fallback")
 
-    # ── Last resort: Ken Burns zoom/pan ──────────────────────────────────────
+    # ── 4. Last resort: Ken Burns zoom/pan ───────────────────────────────────
     if audio_path.exists():
         return _kenburns_fallback(img_path, audio_path, out, scene_id)
 

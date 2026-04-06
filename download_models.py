@@ -55,13 +55,25 @@ def main():
         print("Run: pip install huggingface_hub")
         sys.exit(1)
 
-    def dl(repo, filename, dest_dir, label, size_hint=""):
-        dest = dest_dir / filename
+    def dl(repo, hf_filename, dest_dir, label, size_hint="", dest_name=None):
+        """Download a single file from HuggingFace to dest_dir/dest_name.
+        hf_filename: path within the repo (may include subdirs like split_files/...)
+        dest_name: local filename (defaults to basename of hf_filename)
+        """
+        if dest_name is None:
+            dest_name = Path(hf_filename).name
+        dest = dest_dir / dest_name
         if dest.exists():
-            print(f"  Already exists: {filename}")
+            print(f"  Already exists: {dest_name}")
             return dest
         print(f"  Downloading {label} {size_hint}...")
-        hf_hub_download(repo_id=repo, filename=filename, local_dir=str(dest_dir))
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            downloaded = hf_hub_download(
+                repo_id=repo, filename=hf_filename,
+                local_dir=tmp, local_dir_use_symlinks=False,
+            )
+            shutil.move(downloaded, str(dest))
         print(f"  Saved: {dest}")
         return dest
 
@@ -71,14 +83,14 @@ def main():
        "ltxv-2b-0.9.8-distilled-fp8.safetensors",
        checkpoints, "LTX 2B", "(~4.2 GB)")
 
-    # ── LTX Video 13B 0.9.7 dev FP8 (high quality primary) ──────────────────
-    print("\n[2/7] LTX Video 13B 0.9.7 dev FP8 (primary animation model)")
+    # ── LTX Video 13B 0.9.8 distilled FP8 (high quality + fast) ─────────────
+    print("\n[2/7] LTX Video 13B 0.9.8 distilled FP8 (primary animation model)")
     if args.skip_ltx13b:
         print("  Skipped (--skip-ltx13b)")
     else:
         dl("Lightricks/LTX-Video",
-           "ltxv-13b-0.9.7-dev-fp8.safetensors",
-           checkpoints, "LTX 13B", "(~13 GB)")
+           "ltxv-13b-0.9.8-distilled-fp8.safetensors",
+           checkpoints, "LTX 13B distilled", "(~13 GB)")
 
     # ── T5-XXL FP8 (shared LTX text encoder) ─────────────────────────────────
     print("\n[3/7] T5-XXL FP8 text encoder")
