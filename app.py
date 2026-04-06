@@ -13,6 +13,19 @@ from pathlib import Path
 
 import gradio as gr
 
+# Patch gradio_client bug: schema can be bool in JSON Schema draft 2019+
+# Causes "TypeError: argument of type 'bool' is not iterable" in Gradio 4.44.1
+try:
+    import gradio_client.utils as _gc_utils
+    _orig_schema_fn = _gc_utils._json_schema_to_python_type
+    def _patched_schema_fn(schema, defs=None):
+        if isinstance(schema, bool):
+            return "bool"
+        return _orig_schema_fn(schema, defs)
+    _gc_utils._json_schema_to_python_type = _patched_schema_fn
+except Exception:
+    pass
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 AI_EDU_DIR   = Path("/Volumes/bujji1/sravya/ai_edu")
 COMFYUI_DIR  = Path("/Volumes/bujji1/sravya/ComfyUI")
@@ -577,11 +590,11 @@ def refresh_status():
 
 def step_generate_script(topic: str):
     if not topic.strip():
-        yield "Please enter a topic.", "", gr.update(visible=False)
+        yield "Please enter a topic.", ""
         return
 
     log = [f"Generating script for: **{topic}**\n"]
-    yield "\n".join(log), "", gr.update(visible=False)
+    yield "\n".join(log), ""
 
     try:
         def progress(msg):
@@ -589,7 +602,7 @@ def step_generate_script(topic: str):
         data = run_gemma(topic.strip(), progress_fn=progress)
     except Exception as e:
         log.append(f"Error: {e}")
-        yield "\n".join(log), "", gr.update(visible=False)
+        yield "\n".join(log), ""
         return
 
     _session["topic"]       = topic.strip()
@@ -606,7 +619,7 @@ def step_generate_script(topic: str):
         script_lines.append(f"**Image:** {desc[:120]}...")
         script_lines.append(f"**Narration:** {scene['narration']}\n")
 
-    yield "\n".join(log), "\n".join(script_lines), gr.update(visible=True)
+    yield "\n".join(log), "\n".join(script_lines)
 
 # ── Step 2: Generate Images ────────────────────────────────────────────────────
 
@@ -846,12 +859,12 @@ All models run locally on your Mac Studio M4 Max. No internet needed after first
             script_btn = gr.Button("✨ Generate Script", variant="primary", scale=1)
 
         script_log    = gr.Markdown()
-        script_output = gr.Markdown(visible=False)
+        script_output = gr.Markdown()
 
         script_btn.click(
             step_generate_script,
             inputs=topic_input,
-            outputs=[script_log, script_output, script_output],
+            outputs=[script_log, script_output],
         )
 
     # ── Tab: Images ─────────────────────────────────────────────────────────
@@ -1053,8 +1066,8 @@ if __name__ == "__main__":
                 os.environ.setdefault(k.strip(), v.strip())
 
     demo.launch(
-        server_name="0.0.0.0",
+        server_name="127.0.0.1",
         server_port=7860,
         share=False,
-        inbrowser=True,
+        show_api=False,
     )
