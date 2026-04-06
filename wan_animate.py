@@ -37,11 +37,16 @@ ANIMATION_PROMPTS = {
     2:  "gentle ocean waves crash rhythmically against tall golden coin cliffs, "
         "coins gleam in warm sunlight, camera slowly pulls back revealing the full cliffs",
 
-    3:  "giant gold coin spins and tumbles through the air above crashing waves, "
-        "catching sunlight dramatically, slow motion spin, golden rays radiate",
+    3:  "gold coin flipping end over end in slow motion, "
+        "coin rotates 360 degrees showing H face then T face alternately, "
+        "the coin spins rapidly on its axis tumbling through golden light, "
+        "each face of the coin clearly visible during the full rotation flip, "
+        "dramatic tumbling motion with light glinting off each side",
 
-    4:  "camera slowly glides forward between six giant red dice boulders in the desert, "
-        "warm desert wind blows sand gently, long shadows move softly",
+    4:  "six giant red dice simultaneously rolling and tumbling across the desert floor, "
+        "each dice rolling to reveal different numbers, dice tumbling with dust clouds, "
+        "dramatic rolling motion, numbers 1 through 6 visible on tumbling faces, "
+        "sand swirling around the rolling dice boulders",
 
     5:  "spotlight beam slowly sweeps across dice boulders and locks onto the four-dot face, "
         "golden glow pulses and brightens on the four dots, dramatic cinematic reveal",
@@ -109,7 +114,7 @@ def ensure_comfyui():
 
 # ── LTX Video I2V workflow ────────────────────────────────────────────────────
 
-def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49, scene_id: int = 1) -> dict:
+def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49, scene_id: int = 1, steps: int = 4) -> dict:
     """
     LTX Video 2B distilled I2V workflow.
     Distilled model = only 4 steps. Fast on Apple Silicon MPS.
@@ -160,7 +165,7 @@ def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49,
         "9": {
             "class_type": "LTXVScheduler",
             "inputs": {
-                "steps": 4, "max_shift": 2.05, "base_shift": 0.95,
+                "steps": steps, "max_shift": 2.05, "base_shift": 0.95,
                 "stretch": True, "terminal": 0.1, "latent": ["7", 2],
             }
         },
@@ -175,6 +180,7 @@ def _build_ltxv_workflow(image_filename: str, prompt: str, num_frames: int = 49,
                 "latent_image": ["7", 2],
             }
         },
+        # Steps also passed to KSamplerSelect via sigmas above
         "15": {"class_type": "VAEDecode", "inputs": {"samples": ["14", 0], "vae": ["2", 2]}},
         "12": {"class_type": "SaveImage", "inputs": {"images": ["15", 0], "filename_prefix": prefix}},
     }
@@ -355,6 +361,9 @@ def _try_ltxv(scene_id: int, img_path: Path, out: Path):
     num_frames = 201
     num_frames = max(9, ((num_frames - 9) // 8) * 8 + 9)
 
+    # Scenes with complex motion (coin flip, dice roll) get more steps for quality
+    steps = 8 if scene_id in (3, 4) else 4
+
     try:
         img_filename = upload_image_to_comfy(img_path)
     except Exception as e:
@@ -362,7 +371,7 @@ def _try_ltxv(scene_id: int, img_path: Path, out: Path):
         return None
 
     prefix = f"ltxv_s{scene_id:02d}_"
-    workflow = _build_ltxv_workflow(img_filename, prompt, num_frames, scene_id)
+    workflow = _build_ltxv_workflow(img_filename, prompt, num_frames, scene_id, steps=steps)
 
     try:
         result = _comfy_post("/prompt", {"prompt": workflow})
