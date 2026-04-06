@@ -12,9 +12,17 @@ Run:
     python gurukul_island.py --all         # everything end-to-end
 """
 
-import subprocess, sys
+import subprocess, sys, os
 import numpy as np
 from pathlib import Path
+
+# Load .env if present (picks up ELEVENLABS_API_KEY)
+_env_file = Path(__file__).parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        if "=" in _line and not _line.startswith("#"):
+            _k, _v = _line.strip().split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 AI_EDU_DIR   = Path("/Volumes/bujji1/sravya/ai_edu")
 SCENES_DIR   = AI_EDU_DIR / "output" / "island_scenes"
@@ -61,19 +69,20 @@ SCENE_DEFS = [
      "sea spray below, dramatic sky, sense of suspense and wonder"),
 
     (4,
-     "vast open plains with six enormous red dice scattered like ancient boulders, "
-     "each dice clearly shows different numbers of dots on their faces, "
-     "numbered one through six, warm desert sunset light, "
-     "long dramatic shadows, a winding path between the dice, "
-     "sense of scale and wonder"),
+     "vast open desert plains at sunset with exactly six enormous red dice boulders, "
+     "each dice boulder has a different number of dots facing the viewer, "
+     "first dice shows 1 dot, second dice shows 2 dots, third dice shows 3 dots, "
+     "fourth dice shows 4 dots, fifth dice shows 5 dots, sixth dice shows 6 dots, "
+     "each dice face clearly distinct and readable, "
+     "all six faces of the dice concept represented, "
+     "long dramatic shadows, warm golden desert light"),
 
     (5,
-     "close up of one giant red dice boulder in the plains, "
-     "the face showing four dots is glowing bright gold, "
-     "other five faces are in shadow, "
-     "one spotlight of light hitting the four-dot face, "
-     "dramatic contrast, the other five dice visible in background, "
-     "sense of one being chosen out of many"),
+     "dramatic close-up of one giant red dice boulder in golden plains, "
+     "the face showing exactly four dots glowing bright gold and spotlit, "
+     "other five dice boulders visible in background each showing a different number 1 2 3 5 6, "
+     "one single beam of golden light illuminating the four-dot face, "
+     "dark dramatic contrast, sense of one being chosen from six"),
 
     (6,
      "enchanted forest with magical glowing trees, "
@@ -107,12 +116,14 @@ SCENE_DEFS = [
      "contrast with the warm sunny island behind it"),
 
     (10,
-     "wide view of the entire magical probability island from above at dusk, "
-     "coin cliffs glowing gold, dice plains with warm light, "
-     "enchanted fruit forest with red and blue glowing lights, "
-     "a sparkling river winding through labeled zero at one end "
-     "and one at the other in glowing stones, "
-     "magical golden sunset, triumphant and beautiful"),
+     "breathtaking wide aerial view of the entire magical probability island at triumphant golden sunset, "
+     "left: towering golden coin cliffs with giant H and T coins glowing by the sparkling ocean, "
+     "center: vast desert plains with six giant red dice boulders each showing a different number, "
+     "right: enchanted glowing forest with red and blue light trees, "
+     "a sparkling magical river winds through all three zones connecting everything, "
+     "dramatic golden rays flooding the entire island from above, "
+     "spectacular triumphant celebratory atmosphere, "
+     "most beautiful shot of the whole video"),
 ]
 
 # ── Narration script ──────────────────────────────────────────────────────────
@@ -270,7 +281,7 @@ def generate_all_scenes():
 
 # Set ELEVENLABS_API_KEY in your environment to use ElevenLabs.
 # If not set or if generation fails, falls back to local Kokoro TTS automatically.
-ELEVENLABS_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # "Adam" — deep warm male narrator
+ELEVENLABS_VOICE_ID = "onwK4e9ZLuTAKqWW03F9"  # "Daniel" — warm British narrator, clear educational tone
 
 def _generate_elevenlabs(text: str, out_path: Path) -> bool:
     """Try ElevenLabs. Returns True on success, False on failure."""

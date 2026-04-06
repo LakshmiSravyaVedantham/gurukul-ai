@@ -1,0 +1,15 @@
+# Core
+moviepy==1.0.3
+soundfile
+numpy
+
+# Image generation (Apple Silicon)
+mflux
+
+# TTS
+kokoro>=0.9.2
+elevenlabs          # optional — falls back to Kokoro if ELEVENLABS_API_KEY not set
+
+# Model downloads
+huggingface_hub
+safetensors
