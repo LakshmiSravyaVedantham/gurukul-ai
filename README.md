@@ -25,7 +25,7 @@ flowchart TD
 
     I[🎬 MoviePy Assembly\nping-pong loop · audio sync\nper-scene duration match]
 
-    I --> J[📹 probability_island_animated.mp4]
+    I --> J[📹 animated.mp4]
 ```
 
 ## Setup
