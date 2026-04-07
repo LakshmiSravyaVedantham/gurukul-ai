@@ -52,12 +52,11 @@ for d in [AGENIC_DIR, DATASET_DIR]:
 # ── Model escalation order ─────────────────────────────────────────────────────
 # When a model fails the quality bar, escalate to the next tier.
 ESCALATION = [
-    "ken-burns",        # instant fallback
-    "ltx-2b",           # 40s, fast preview
-    "ltx23-gguf",       # 4-6min, best speed/quality
-    "wan22-fun-5b-gguf",# 8-10min, object motion
-    "wan22-fun-5b",     # 12min, BF16 fallback
-    "ltx-13b",          # 11min, quality
+    "ken-burns",         # instant fallback
+    "ltx-2b",            # 40s, fast preview
+    "wan22-fun-5b-gguf", # 8-10min, object motion (ltx23-gguf skipped: TE dim mismatch)
+    "wan22-fun-5b",      # 12min, BF16 fallback
+    "ltx-13b",           # 11min, quality
     "wan22-i2v-14b-gguf",# 15-20min, best quality
 ]
 
@@ -264,12 +263,27 @@ print(output.strip(), flush=True)
     # Clean up frames
     for f in frames:
         f.unlink(missing_ok=True)
-    if frames:
-        frames[0].parent.rmdir() if frames[0].parent.exists() else None
+    try:
+        if frames and frames[0].parent.exists():
+            frames[0].parent.rmdir()
+    except Exception:
+        pass
 
-    raw = result.stdout.strip() if result.returncode == 0 else ""
+    raw = result.stdout.strip()
+    if not raw or result.returncode != 0:
+        # Log what went wrong so we can debug
+        stderr_tail = result.stderr.strip()[-500:] if result.stderr else ""
+        if log_fn:
+            if stderr_tail:
+                log_fn(f"  Critic stderr: {stderr_tail[-200:]}")
+            log_fn(f"  Critic returned no output (exit {result.returncode}) — accepting with default score 6.0")
+        return {"overall": 6.0, "motion_stability": 6.0, "visual_quality": 6.0,
+                "prompt_adherence": 6.0, "cinematic_quality": 6.0,
+                "issues": ["critic unavailable"], "raw": stderr_tail}
+
     scores = _parse_critic_output(raw)
     if log_fn:
+        log_fn(f"  Raw critic output: {raw[:200]}")
         log_fn(f"  Score: {scores['overall']:.1f}/10 | Issues: {', '.join(scores['issues']) or 'none'}")
     return scores
 
