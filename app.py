@@ -1154,6 +1154,142 @@ Useful for model comparison — animate the same scene with different models.
             outputs=[test_log, test_video],
         )
 
+    # ── Tab: /selfimprove — Agentic Pipeline ──────────────────────────────────
+    with gr.Tab("⚡ /selfimprove"):
+        gr.Markdown("""
+## Agentic Self-Improving Pipeline
+**5 stages run automatically:**
+`Director (Gemma 4)` → `Creator (your model)` → `Critic (Qwen2.5-VL)` → `Refiner (auto-retry)` → `Polisher (Topaz 4K)`
+
+The Critic scores every video 1-10. If below your threshold, the pipeline escalates to a better model and retries automatically.
+Run on all models at once to build a **leaderboard** — the winner feeds your training dataset.
+        """)
+
+        with gr.Row():
+            with gr.Column(scale=3):
+                si_prompt = gr.Textbox(
+                    label="Simple Prompt",
+                    placeholder="e.g. coin slowly flipping in golden light",
+                    info="Gemma 4 will expand this into a full cinematic prompt automatically",
+                )
+                with gr.Row():
+                    si_scene    = gr.Slider(1, 10, value=3, step=1, label="Scene")
+                    si_minscore = gr.Slider(1.0, 10.0, value=7.0, step=0.5, label="Min score to accept")
+                    si_maxtries = gr.Slider(1, 5, value=3, step=1, label="Max attempts")
+                with gr.Row():
+                    si_topaz    = gr.Checkbox(label="Topaz 4K upscale (if installed)", value=True)
+                    si_dataset  = gr.Checkbox(label="Save approved clips to training dataset", value=True)
+            with gr.Column(scale=2):
+                gr.Markdown("""
+**Escalation order** (auto when score too low):
+1. LTX-2B (40s)
+2. LTX-2.3 GGUF (4-6min)
+3. Wan 2.2 Fun 5B GGUF (8-10min)
+4. LTX-13B (11min)
+5. Wan 2.2 I2V-A14B GGUF (15-20min)
+                """)
+
+        with gr.Row():
+            si_run_one = gr.Button("▶ Run Single Model", variant="primary")
+            si_run_all = gr.Button("🏆 Benchmark ALL Models", variant="secondary")
+            si_leaderboard_btn = gr.Button("📊 Show Leaderboard")
+
+        si_log   = gr.Markdown()
+        si_video = gr.Video(label="Best result", height=400)
+
+        with gr.Accordion("Leaderboard", open=False):
+            si_leaderboard_md = gr.Markdown("Click 'Show Leaderboard' to load.")
+
+        def _stream_agentic(prompt, scene_id, model_key, min_score, max_tries, topaz, dataset):
+            if not prompt.strip():
+                yield "Enter a prompt first.", None
+                return
+            from agentic_pipeline import agentic_generate
+            log_lines = []
+            def log_fn(msg):
+                log_lines.append(msg)
+            import threading
+            result = {}
+            def run():
+                result.update(agentic_generate(
+                    simple_prompt=prompt, scene_id=int(scene_id),
+                    model_key=model_key, min_score=min_score,
+                    max_attempts=int(max_tries),
+                    topaz_upscale_=topaz, save_dataset_=dataset,
+                    log_fn=log_fn,
+                ))
+            t = threading.Thread(target=run)
+            t.start()
+            while t.is_alive():
+                yield "\n".join(log_lines[-30:]), None
+                time.sleep(1)
+            t.join()
+            video = result.get("video")
+            score = result.get("scores", {}).get("overall", 0)
+            log_lines.append(f"\n**Final score: {score:.1f}/10**")
+            yield "\n".join(log_lines[-30:]), video
+
+        def _stream_benchmark(prompt, scene_id, min_score, max_tries, topaz, dataset):
+            if not prompt.strip():
+                yield "Enter a prompt first.", None
+                return
+            from agentic_pipeline import benchmark_all_models
+            log_lines = []
+            def log_fn(msg):
+                log_lines.append(msg)
+            import threading
+            results = []
+            def run():
+                results.extend(benchmark_all_models(
+                    simple_prompt=prompt, scene_id=int(scene_id),
+                    min_score=min_score, max_attempts=int(max_tries),
+                    topaz_upscale_=topaz, log_fn=log_fn,
+                ))
+            t = threading.Thread(target=run)
+            t.start()
+            while t.is_alive():
+                yield "\n".join(log_lines[-30:]), None
+                time.sleep(1)
+            t.join()
+            best = results[0] if results else {}
+            video = best.get("video")
+            yield "\n".join(log_lines[-30:]), video
+
+        def _show_leaderboard():
+            lb_path = AI_EDU_DIR / "output" / "model_leaderboard.json"
+            if not lb_path.exists():
+                return "No leaderboard data yet. Run the pipeline first."
+            import json as _json
+            data = _json.loads(lb_path.read_text())
+            agg = {}
+            for row in data:
+                m = row["model"]
+                if m not in agg: agg[m] = {"scores": [], "times": []}
+                agg[m]["scores"].append(row["overall_score"])
+                agg[m]["times"].append(row["generation_time"])
+            ranked = sorted(agg.items(),
+                            key=lambda x: sum(x[1]["scores"]) / len(x[1]["scores"]),
+                            reverse=True)
+            lines = ["| Rank | Model | Avg Score | Runs | Avg Time |",
+                     "|---|---|---|---|---|"]
+            for i, (model, d) in enumerate(ranked, 1):
+                avg = sum(d["scores"]) / len(d["scores"])
+                t   = sum(d["times"])  / len(d["times"])
+                lines.append(f"| {i} | **{model}** | {avg:.1f}/10 {'★'*int(avg)} | {len(d['scores'])} | {t/60:.1f}min |")
+            return "\n".join(lines)
+
+        si_run_one.click(
+            _stream_agentic,
+            inputs=[si_prompt, si_scene, model_radio, si_minscore, si_maxtries, si_topaz, si_dataset],
+            outputs=[si_log, si_video],
+        )
+        si_run_all.click(
+            _stream_benchmark,
+            inputs=[si_prompt, si_scene, si_minscore, si_maxtries, si_topaz, si_dataset],
+            outputs=[si_log, si_video],
+        )
+        si_leaderboard_btn.click(_show_leaderboard, outputs=si_leaderboard_md)
+
     # ── Tab: About Models ─────────────────────────────────────────────────────
     with gr.Tab("About Models"):
         gr.Markdown("""
