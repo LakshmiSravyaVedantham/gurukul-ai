@@ -73,7 +73,7 @@ def _upload(img_path: Path) -> str:
     return img_path.name
 
 def _wait_for_job(prompt_id: str, prefix: str, out: Path, fps: int = 25,
-                  max_wait: int = 3600) -> Path | None:
+                  max_wait: int = 3600) -> Path:
     """Poll ComfyUI until job completes, then assemble MP4."""
     for _ in range(max_wait // 3):
         time.sleep(3)
@@ -162,7 +162,7 @@ def _wf_wan_fun(img_file: str, prompt: str, num_frames: int, scene_id: int) -> d
         "10": {"class_type": "KSampler",
                "inputs": {"model": ["2", 0], "positive": ["9", 0], "negative": ["9", 1],
                           "latent_image": ["9", 2], "seed": 42 + scene_id,
-                          "steps": 20, "cfg": 5.0, "sampler_name": "euler",
+                          "steps": 10, "cfg": 5.0, "sampler_name": "euler",
                           "scheduler": "linear_quadratic", "denoise": 1.0}},
         "11": {"class_type": "VAEDecode",       "inputs": {"samples": ["10", 0], "vae": ["5", 0]}},
         "12": {"class_type": "SaveImage",       "inputs": {"images": ["11", 0], "filename_prefix": "test_wan-fun-1b_"}},
@@ -170,33 +170,39 @@ def _wf_wan_fun(img_file: str, prompt: str, num_frames: int, scene_id: int) -> d
 
 def _wf_wan22(img_file: str, prompt: str, model_name: str, num_frames: int,
               scene_id: int, label: str) -> dict:
-    """Wan 2.2 I2V 14B workflow (low-noise or high-noise)."""
+    """
+    Wan 2.2 I2V 14B workflow (low-noise or high-noise).
+    WanAnimateToVideo prepares image-conditioned positive/negative/latent,
+    then KSampler denoises with the Wan 2.2 model.
+    """
     num_frames = max(5, ((num_frames - 1) // 4) * 4 + 1)
     return {
-        "1":  {"class_type": "LoadImage",       "inputs": {"image": img_file}},
-        "2":  {"class_type": "UNETLoader",      "inputs": {"unet_name": model_name, "weight_dtype": "default"}},
-        "3":  {"class_type": "CLIPLoader",      "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
-        "4":  {"class_type": "CLIPVisionLoader","inputs": {"clip_name": "sigclip_vision_patch14_384.safetensors"}},
-        "5":  {"class_type": "VAELoader",       "inputs": {"vae_name": "wan_2.1_vae.safetensors"}},
-        "12": {"class_type": "CLIPVisionEncode","inputs": {"clip_vision": ["4", 0], "image": ["1", 0], "crop": "center"}},
-        "6":  {"class_type": "CLIPTextEncode",  "inputs": {"text": prompt + ", smooth cinematic motion, high quality", "clip": ["3", 0]}},
-        "7":  {"class_type": "CLIPTextEncode",  "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
-        "8":  {"class_type": "WanImageToVideo",
-               "inputs": {"positive": ["6", 0], "negative": ["7", 0], "vae": ["5", 0],
-                          "width": 832, "height": 480, "length": num_frames,
-                          "batch_size": 1, "clip_vision_output": ["12", 0], "start_image": ["1", 0]}},
-        "9":  {"class_type": "KSampler",
-               "inputs": {"model": ["2", 0], "positive": ["8", 0], "negative": ["8", 1],
-                          "latent_image": ["8", 2], "seed": 42 + scene_id,
-                          "steps": 20, "cfg": 5.0, "sampler_name": "euler",
-                          "scheduler": "linear_quadratic", "denoise": 1.0}},
-        "10": {"class_type": "VAEDecode",       "inputs": {"samples": ["9", 0], "vae": ["5", 0]}},
-        "11": {"class_type": "SaveImage",       "inputs": {"images": ["10", 0], "filename_prefix": f"test_{label}_"}},
+        "1":  {"class_type": "LoadImage",         "inputs": {"image": img_file}},
+        "2":  {"class_type": "UNETLoader",         "inputs": {"unet_name": model_name, "weight_dtype": "default"}},
+        "3":  {"class_type": "CLIPLoader",         "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+        "4":  {"class_type": "VAELoader",          "inputs": {"vae_name": "wan2.2_vae.safetensors"}},
+        "5":  {"class_type": "CLIPVisionLoader",   "inputs": {"clip_name": "sigclip_vision_patch14_384.safetensors"}},
+        "6":  {"class_type": "CLIPVisionEncode",   "inputs": {"clip_vision": ["5", 0], "image": ["1", 0], "crop": "center"}},
+        "7":  {"class_type": "CLIPTextEncode",     "inputs": {"text": prompt + ", smooth cinematic motion, high quality", "clip": ["3", 0]}},
+        "8":  {"class_type": "CLIPTextEncode",     "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
+        # WanAnimateToVideo: embeds image conditioning into positive/negative and creates latent
+        "9":  {"class_type": "WanAnimateToVideo",
+               "inputs": {"positive": ["7", 0], "negative": ["8", 0], "vae": ["4", 0],
+                          "width": 832, "height": 480, "length": num_frames, "batch_size": 1,
+                          "continue_motion_max_frames": 5, "video_frame_offset": 0,
+                          "clip_vision_output": ["6", 0], "reference_image": ["1", 0]}},
+        "10": {"class_type": "KSampler",
+               "inputs": {"model": ["2", 0],
+                          "positive": ["9", 0], "negative": ["9", 1], "latent_image": ["9", 2],
+                          "seed": 42 + scene_id, "steps": 20, "cfg": 5.0,
+                          "sampler_name": "euler", "scheduler": "linear_quadratic", "denoise": 1.0}},
+        "11": {"class_type": "VAEDecode",          "inputs": {"samples": ["10", 0], "vae": ["4", 0]}},
+        "12": {"class_type": "SaveImage",          "inputs": {"images": ["11", 0], "filename_prefix": f"test_{label}_"}},
     }
 
 # ── Individual model test functions ───────────────────────────────────────────
 
-def test_ltx_2b(img_path: Path, prompt: str, scene_id: int) -> Path | None:
+def test_ltx_2b(img_path: Path, prompt: str, scene_id: int) -> Path:
     out = TEST_DIR / "ltx-2b.mp4"
     img_file = _upload(img_path)
     wf = _wf_ltx(img_file, prompt, "ltxv-2b-0.9.8-distilled-fp8.safetensors",
@@ -205,7 +211,7 @@ def test_ltx_2b(img_path: Path, prompt: str, scene_id: int) -> Path | None:
     print(f"    Queued {r['prompt_id'][:8]}...")
     return _wait_for_job(r["prompt_id"], "test_ltx-2b_", out)
 
-def test_ltx_13b(img_path: Path, prompt: str, scene_id: int) -> Path | None:
+def test_ltx_13b(img_path: Path, prompt: str, scene_id: int) -> Path:
     out = TEST_DIR / "ltx-13b.mp4"
     ck = COMFYUI_DIR / "models" / "checkpoints" / "ltxv-13b-0.9.8-distilled-fp8.safetensors"
     if not ck.exists():
@@ -218,7 +224,43 @@ def test_ltx_13b(img_path: Path, prompt: str, scene_id: int) -> Path | None:
     print(f"    Queued {r['prompt_id'][:8]}...")
     return _wait_for_job(r["prompt_id"], "test_ltx-13b_", out)
 
-def test_wan_fun_1b(img_path: Path, prompt: str, scene_id: int) -> Path | None:
+def test_wan22_fun_5b(img_path: Path, prompt: str, scene_id: int) -> Path:
+    """Wan 2.2 Fun InP 5B — single model, same WanFunInpaintToVideo node as 1.3B."""
+    out = TEST_DIR / "wan22-fun-5b.mp4"
+    mp = COMFYUI_DIR / "models" / "diffusion_models" / "wan2.2_fun_inpaint_5B_bf16.safetensors"
+    if not mp.exists():
+        print("    wan22-fun-5b not downloaded — skip")
+        return None
+    img_file = _upload(img_path)
+    # Same workflow structure as 1.3B but with the 5B model
+    num_frames = max(5, ((81 - 1) // 4) * 4 + 1)
+    wf = {
+        "1":  {"class_type": "LoadImage",       "inputs": {"image": img_file}},
+        "2":  {"class_type": "UNETLoader",      "inputs": {"unet_name": mp.name, "weight_dtype": "default"}},
+        "3":  {"class_type": "CLIPLoader",      "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+        "4":  {"class_type": "CLIPVisionLoader","inputs": {"clip_name": "clip_vision_h.safetensors"}},
+        "5":  {"class_type": "VAELoader",       "inputs": {"vae_name": "wan2.2_vae.safetensors"}},
+        "6":  {"class_type": "CLIPVisionEncode","inputs": {"clip_vision": ["4", 0], "image": ["1", 0], "crop": "center"}},
+        "7":  {"class_type": "CLIPTextEncode",  "inputs": {"text": prompt + ", smooth motion, high quality, cinematic", "clip": ["3", 0]}},
+        "8":  {"class_type": "CLIPTextEncode",  "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
+        "9":  {"class_type": "WanFunInpaintToVideo",
+               "inputs": {"positive": ["7", 0], "negative": ["8", 0], "vae": ["5", 0],
+                          "width": 832, "height": 480, "length": num_frames,
+                          "batch_size": 1, "clip_vision_output": ["6", 0], "start_image": ["1", 0]}},
+        "10": {"class_type": "KSampler",
+               "inputs": {"model": ["2", 0], "positive": ["9", 0], "negative": ["9", 1],
+                          "latent_image": ["9", 2], "seed": 42 + scene_id,
+                          "steps": 20, "cfg": 5.0, "sampler_name": "euler",
+                          "scheduler": "linear_quadratic", "denoise": 1.0}},
+        "11": {"class_type": "VAEDecode",       "inputs": {"samples": ["10", 0], "vae": ["5", 0]}},
+        "12": {"class_type": "SaveImage",       "inputs": {"images": ["11", 0], "filename_prefix": "test_wan22-fun-5b_"}},
+    }
+    r = _comfy_post("/prompt", {"prompt": wf})
+    print(f"    Queued {r['prompt_id'][:8]}...")
+    return _wait_for_job(r["prompt_id"], "test_wan22-fun-5b_", out, fps=25, max_wait=7200)
+
+
+def test_wan_fun_1b(img_path: Path, prompt: str, scene_id: int) -> Path:
     out = TEST_DIR / "wan-fun-1b.mp4"
     wf_path = COMFYUI_DIR / "models" / "diffusion_models" / "wan2.1_fun_inp_1.3B_bf16.safetensors"
     if not wf_path.exists():
@@ -230,31 +272,31 @@ def test_wan_fun_1b(img_path: Path, prompt: str, scene_id: int) -> Path | None:
     print(f"    Queued {r['prompt_id'][:8]}...")
     return _wait_for_job(r["prompt_id"], "test_wan-fun-1b_", out, fps=25)
 
-def test_wan22_low(img_path: Path, prompt: str, scene_id: int) -> Path | None:
+def test_wan22_low(img_path: Path, prompt: str, scene_id: int) -> Path:
     out = TEST_DIR / "wan22-low.mp4"
     mp = COMFYUI_DIR / "models" / "diffusion_models" / "wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors"
     if not mp.exists():
         print("    wan22-low not downloaded — skip")
         return None
     img_file = _upload(img_path)
-    wf = _wf_wan22(img_file, prompt, mp.name, num_frames=81, scene_id=scene_id, label="wan22-low")
+    wf = _wf_wan22(img_file, prompt, mp.name, num_frames=33, scene_id=scene_id, label="wan22-low")
     r = _comfy_post("/prompt", {"prompt": wf})
     print(f"    Queued {r['prompt_id'][:8]}...")
-    return _wait_for_job(r["prompt_id"], "test_wan22-low_", out, fps=25)
+    return _wait_for_job(r["prompt_id"], "test_wan22-low_", out, fps=25, max_wait=7200)
 
-def test_wan22_high(img_path: Path, prompt: str, scene_id: int) -> Path | None:
+def test_wan22_high(img_path: Path, prompt: str, scene_id: int) -> Path:
     out = TEST_DIR / "wan22-high.mp4"
     mp = COMFYUI_DIR / "models" / "diffusion_models" / "wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors"
     if not mp.exists():
         print("    wan22-high not downloaded — skip")
         return None
     img_file = _upload(img_path)
-    wf = _wf_wan22(img_file, prompt, mp.name, num_frames=81, scene_id=scene_id, label="wan22-high")
+    wf = _wf_wan22(img_file, prompt, mp.name, num_frames=33, scene_id=scene_id, label="wan22-high")
     r = _comfy_post("/prompt", {"prompt": wf})
     print(f"    Queued {r['prompt_id'][:8]}...")
-    return _wait_for_job(r["prompt_id"], "test_wan22-high_", out, fps=25)
+    return _wait_for_job(r["prompt_id"], "test_wan22-high_", out, fps=25, max_wait=7200)
 
-def test_mlx_ltx2(img_path: Path, prompt: str, scene_id: int) -> Path | None:
+def test_mlx_ltx2(img_path: Path, prompt: str, scene_id: int) -> Path:
     out = TEST_DIR / "mlx-ltx2.mp4"
     if not Path(MLX_PYTHON).exists():
         print("    mlx-video venv not found — skip")
@@ -274,9 +316,9 @@ generate_video(
     prompt={full_prompt!r},
     pipeline=PipelineType.DISTILLED,
     negative_prompt={NEG_PROMPT!r},
-    height=480, width=832,
-    num_frames=97,
-    num_inference_steps=8,
+    height=512, width=768,
+    num_frames=25,
+    num_inference_steps=4,
     seed={42 + scene_id},
     fps=24,
     output_path={str(out)!r},
@@ -287,22 +329,172 @@ generate_video(
 )
 """
     print(f"    MLX LTX-2 distilled (downloads {MLX_REPO} if not cached)...")
-    result = subprocess.run([MLX_PYTHON, "-c", script], timeout=3600)
+    result = subprocess.run([MLX_PYTHON, "-c", script], timeout=7200)
     if result.returncode == 0 and out.exists() and out.stat().st_size > 10_000:
         return out
     print(f"    MLX failed (exit {result.returncode})")
     if out.exists(): out.unlink(missing_ok=True)
     return None
 
+# ── GGUF model test functions ─────────────────────────────────────────────────
+
+WAN22_FUN5B_GGUF  = "Wan2.2-Fun-5B-InP-Q8_0.gguf"
+WAN22_14B_HIGH    = "Wan2.2-I2V-A14B-HighNoise-Q5_0.gguf"
+WAN22_14B_LOW     = "Wan2.2-I2V-A14B-LowNoise-Q4_0.gguf"
+LTX23_DISTILLED   = "ltx-2.3-22b-distilled-Q4_0.gguf"
+LTX23_TE          = "ltx-2.3-22b-distilled_embeddings_connectors.safetensors"
+LTX23_VAE         = "ltx-2.3-22b-distilled_video_vae.safetensors"
+
+
+def test_wan22_fun5b_gguf(img_path: Path, prompt: str, scene_id: int) -> Path:
+    """Wan 2.2 Fun InP 5B — GGUF Q8_0. Drop-in upgrade over BF16, avoids MPS float8 errors."""
+    out = TEST_DIR / "wan22-fun-5b-gguf.mp4"
+    mp  = COMFYUI_DIR / "models" / "diffusion_models" / WAN22_FUN5B_GGUF
+    if not mp.exists():
+        print(f"    {WAN22_FUN5B_GGUF} not downloaded — skip")
+        return None
+    img_file = _upload(img_path)
+    num_frames = max(5, ((81 - 1) // 4) * 4 + 1)
+    prefix = "test_wan22-fun5b-gguf_"
+    wf = {
+        "1":  {"class_type": "LoadImage",         "inputs": {"image": img_file}},
+        "2":  {"class_type": "UnetLoaderGGUF",    "inputs": {"unet_name": mp.name}},
+        "3":  {"class_type": "CLIPLoader",        "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+        "4":  {"class_type": "CLIPVisionLoader",  "inputs": {"clip_name": "clip_vision_h.safetensors"}},
+        "5":  {"class_type": "VAELoader",         "inputs": {"vae_name": "wan2.2_vae.safetensors"}},
+        "6":  {"class_type": "CLIPVisionEncode",  "inputs": {"clip_vision": ["4", 0], "image": ["1", 0], "crop": "center"}},
+        "7":  {"class_type": "CLIPTextEncode",    "inputs": {"text": prompt + ", smooth motion, high quality, cinematic", "clip": ["3", 0]}},
+        "8":  {"class_type": "CLIPTextEncode",    "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
+        "9":  {"class_type": "WanFunInpaintToVideo",
+               "inputs": {"positive": ["7", 0], "negative": ["8", 0], "vae": ["5", 0],
+                          "width": 832, "height": 480, "length": num_frames,
+                          "batch_size": 1, "clip_vision_output": ["6", 0], "start_image": ["1", 0]}},
+        "10": {"class_type": "KSampler",
+               "inputs": {"model": ["2", 0], "positive": ["9", 0], "negative": ["9", 1],
+                          "latent_image": ["9", 2], "seed": 42 + scene_id,
+                          "steps": 10, "cfg": 5.0, "sampler_name": "euler",
+                          "scheduler": "linear_quadratic", "denoise": 1.0}},
+        "11": {"class_type": "VAEDecode",         "inputs": {"samples": ["10", 0], "vae": ["5", 0]}},
+        "12": {"class_type": "SaveImage",         "inputs": {"images": ["11", 0], "filename_prefix": prefix}},
+    }
+    r = _comfy_post("/prompt", {"prompt": wf})
+    print(f"    Queued {r['prompt_id'][:8]}...")
+    return _wait_for_job(r["prompt_id"], prefix, out, fps=25, max_wait=7200)
+
+
+def test_wan22_i2v_14b_gguf(img_path: Path, prompt: str, scene_id: int) -> Path:
+    """Wan 2.2 I2V-A14B GGUF — dual HighNoise+LowNoise pipeline via GGUF loader.
+    Bypasses the 48ch/16ch channel mismatch that broke the FP8 safetensors version."""
+    out  = TEST_DIR / "wan22-i2v-14b-gguf.mp4"
+    high = COMFYUI_DIR / "models" / "diffusion_models" / WAN22_14B_HIGH
+    low  = COMFYUI_DIR / "models" / "diffusion_models" / WAN22_14B_LOW
+    if not high.exists() or not low.exists():
+        print(f"    Wan2.2 I2V-A14B GGUF files not downloaded — skip")
+        return None
+    img_file   = _upload(img_path)
+    num_frames = max(5, ((33 - 1) // 4) * 4 + 1)
+    prefix     = "test_wan22-i2v-14b-gguf_"
+
+    # Stage 1: HighNoise denoising
+    # Stage 2: LowNoise refinement
+    # Both stages share same VAE, text encoder, CLIP vision
+    wf = {
+        "1":  {"class_type": "LoadImage",         "inputs": {"image": img_file}},
+        # Text encoder + CLIP vision
+        "3":  {"class_type": "CLIPLoader",        "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+        "4":  {"class_type": "CLIPVisionLoader",  "inputs": {"clip_name": "sigclip_vision_patch14_384.safetensors"}},
+        "5":  {"class_type": "VAELoader",         "inputs": {"vae_name": "wan2.2_vae.safetensors"}},
+        "6":  {"class_type": "CLIPVisionEncode",  "inputs": {"clip_vision": ["4", 0], "image": ["1", 0], "crop": "center"}},
+        "7":  {"class_type": "CLIPTextEncode",    "inputs": {"text": prompt + ", smooth cinematic motion, high quality", "clip": ["3", 0]}},
+        "8":  {"class_type": "CLIPTextEncode",    "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
+        # Stage 1: HighNoise model
+        "20": {"class_type": "UnetLoaderGGUF",    "inputs": {"unet_name": high.name}},
+        "21": {"class_type": "WanAnimateToVideo",
+               "inputs": {"positive": ["7", 0], "negative": ["8", 0], "vae": ["5", 0],
+                          "width": 832, "height": 480, "length": num_frames, "batch_size": 1,
+                          "continue_motion_max_frames": 5, "video_frame_offset": 0,
+                          "clip_vision_output": ["6", 0], "reference_image": ["1", 0]}},
+        "22": {"class_type": "KSampler",
+               "inputs": {"model": ["20", 0], "positive": ["21", 0], "negative": ["21", 1],
+                          "latent_image": ["21", 2], "seed": 42 + scene_id,
+                          "steps": 10, "cfg": 5.0, "sampler_name": "euler",
+                          "scheduler": "linear_quadratic", "denoise": 1.0}},
+        # Stage 2: LowNoise refinement
+        "30": {"class_type": "UnetLoaderGGUF",    "inputs": {"unet_name": low.name}},
+        "31": {"class_type": "KSampler",
+               "inputs": {"model": ["30", 0], "positive": ["21", 0], "negative": ["21", 1],
+                          "latent_image": ["22", 0], "seed": 42 + scene_id,
+                          "steps": 10, "cfg": 5.0, "sampler_name": "euler",
+                          "scheduler": "linear_quadratic", "denoise": 0.5}},
+        "40": {"class_type": "VAEDecode",         "inputs": {"samples": ["31", 0], "vae": ["5", 0]}},
+        "41": {"class_type": "SaveImage",         "inputs": {"images": ["40", 0], "filename_prefix": prefix}},
+    }
+    r = _comfy_post("/prompt", {"prompt": wf})
+    print(f"    Queued {r['prompt_id'][:8]}... (dual-stage HighNoise→LowNoise)")
+    return _wait_for_job(r["prompt_id"], prefix, out, fps=25, max_wait=7200)
+
+
+def test_ltx23_gguf(img_path: Path, prompt: str, scene_id: int) -> Path:
+    """LTX-2.3 22B distilled GGUF Q4_0 — newest LTX generation, ~4-6 min on M4 Max.
+    Needs MPS fix: bfloat16→float16 patch in ComfyUI-LTXVideo gemma_encoder.py"""
+    out = TEST_DIR / "ltx23-gguf.mp4"
+    mp  = COMFYUI_DIR / "models" / "diffusion_models" / LTX23_DISTILLED
+    te  = COMFYUI_DIR / "models" / "text_encoders"    / LTX23_TE
+    vae = COMFYUI_DIR / "models" / "vae"              / LTX23_VAE
+    if not mp.exists():
+        print(f"    {LTX23_DISTILLED} not downloaded — skip")
+        return None
+    if not te.exists():
+        print(f"    LTX-2.3 text encoder not downloaded — skip")
+        return None
+
+    img_file   = _upload(img_path)
+    num_frames = max(9, ((97 - 9) // 8) * 8 + 9)   # 97 frames = 3.9s @ 25fps
+    prefix     = "test_ltx23-gguf_"
+
+    wf = {
+        "1":  {"class_type": "LoadImage",         "inputs": {"image": img_file}},
+        "2":  {"class_type": "UnetLoaderGGUF",    "inputs": {"unet_name": mp.name}},
+        # LTX-2.3 uses a combined CLIP+T5 text encoder loaded from a single safetensors
+        "3":  {"class_type": "CLIPLoader",        "inputs": {"clip_name": LTX23_TE, "type": "ltxv"}},
+        "4":  {"class_type": "VAELoader",         "inputs": {"vae_name": LTX23_VAE}},
+        "5":  {"class_type": "CLIPTextEncode",    "inputs": {"text": prompt + ", smooth cinematic motion, high quality, beautiful", "clip": ["3", 0]}},
+        "6":  {"class_type": "CLIPTextEncode",    "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
+        "7":  {"class_type": "LTXVImgToVideo",
+               "inputs": {"positive": ["5", 0], "negative": ["6", 0], "vae": ["4", 0],
+                          "image": ["1", 0], "width": 768, "height": 512,
+                          "length": num_frames, "batch_size": 1, "strength": 1.0}},
+        "8":  {"class_type": "LTXVConditioning",  "inputs": {"positive": ["7", 0], "negative": ["7", 1], "frame_rate": 25.0}},
+        "9":  {"class_type": "LTXVScheduler",
+               "inputs": {"steps": 8, "max_shift": 2.05, "base_shift": 0.95,
+                          "stretch": True, "terminal": 0.1, "latent": ["7", 2]}},
+        "10": {"class_type": "RandomNoise",       "inputs": {"noise_seed": 42 + scene_id}},
+        "11": {"class_type": "BasicGuider",       "inputs": {"model": ["2", 0], "conditioning": ["8", 0]}},
+        "13": {"class_type": "KSamplerSelect",    "inputs": {"sampler_name": "euler"}},
+        "14": {"class_type": "SamplerCustomAdvanced",
+               "inputs": {"noise": ["10", 0], "guider": ["11", 0],
+                          "sampler": ["13", 0], "sigmas": ["9", 0], "latent_image": ["7", 2]}},
+        "15": {"class_type": "VAEDecode",         "inputs": {"samples": ["14", 0], "vae": ["4", 0]}},
+        "12": {"class_type": "SaveImage",         "inputs": {"images": ["15", 0], "filename_prefix": prefix}},
+    }
+    r = _comfy_post("/prompt", {"prompt": wf})
+    print(f"    Queued {r['prompt_id'][:8]}... (LTX-2.3 22B distilled)")
+    return _wait_for_job(r["prompt_id"], prefix, out, fps=25, max_wait=7200)
+
+
 # ── Model registry ────────────────────────────────────────────────────────────
 
 ALL_MODELS = {
-    "ltx-2b":     ("ComfyUI", test_ltx_2b),
-    "ltx-13b":    ("ComfyUI", test_ltx_13b),
-    "wan-fun-1b": ("ComfyUI", test_wan_fun_1b),
-    "wan22-low":  ("ComfyUI", test_wan22_low),
-    "wan22-high": ("ComfyUI", test_wan22_high),
-    "mlx-ltx2":   ("MLX",    test_mlx_ltx2),
+    "ltx-2b":            ("ComfyUI", test_ltx_2b),
+    "ltx-13b":           ("ComfyUI", test_ltx_13b),
+    "ltx23-gguf":        ("ComfyUI", test_ltx23_gguf),
+    "wan-fun-1b":        ("ComfyUI", test_wan_fun_1b),
+    "wan22-fun-5b":      ("ComfyUI", test_wan22_fun_5b),
+    "wan22-fun-5b-gguf": ("ComfyUI", test_wan22_fun5b_gguf),
+    "wan22-i2v-14b-gguf":("ComfyUI", test_wan22_i2v_14b_gguf),
+    "wan22-low":         ("ComfyUI", test_wan22_low),
+    "wan22-high":        ("ComfyUI", test_wan22_high),
+    "mlx-ltx2":          ("MLX",    test_mlx_ltx2),
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────

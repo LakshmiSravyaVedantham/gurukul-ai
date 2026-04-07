@@ -97,6 +97,34 @@ MODELS = {
         "desc":    "prince-canuma/LTX-2-distilled running natively on Apple Silicon via mlx-video. Doesn't need ComfyUI. Uses ~36 GB RAM — close to the 36 GB limit.",
         "badge":   "NO COMFYUI",
     },
+    # ── NEW GGUF models ──────────────────────────────────────────────────────
+    "wan22-fun-5b-gguf": {
+        "label":   "Wan 2.2 Fun 5B GGUF (faster, stabler)",
+        "engine":  "ComfyUI",
+        "time":    "~8-10min/scene",
+        "quality": "★★★★☆",
+        "best_for": "Object motion — faster & more stable than BF16",
+        "desc":    "Wan 2.2 Fun InP 5B Q8_0 GGUF. Same WanFunInpaintToVideo workflow as BF16 but avoids MPS float8 errors. Loads faster, uses less peak RAM. Recommended over the BF16 version.",
+        "badge":   "GGUF UPGRADE",
+    },
+    "wan22-i2v-14b-gguf": {
+        "label":   "Wan 2.2 I2V-A14B GGUF (best quality)",
+        "engine":  "ComfyUI",
+        "time":    "~15-20min/scene",
+        "quality": "★★★★★",
+        "best_for": "Hero scenes, maximum quality finals",
+        "desc":    "Wan 2.2 I2V 14B dual-model (HighNoise Q5_0 + LowNoise Q4_0) via GGUF loader. Previously failed with safetensors channel mismatch — GGUF bypasses this. Best-in-class motion quality.",
+        "badge":   "BEST QUALITY",
+    },
+    "ltx23-gguf": {
+        "label":   "LTX-2.3 22B GGUF (newest LTX)",
+        "engine":  "ComfyUI",
+        "time":    "~4-6min/scene",
+        "quality": "★★★★☆",
+        "best_for": "Speed + quality balance, latest model",
+        "desc":    "LTX-2.3 22B distilled Q4_0 GGUF. Newest generation from Lightricks — better motion than LTX 0.9.8, less freezing. Requires MPS float16 patch. Fastest quality option.",
+        "badge":   "NEWEST",
+    },
 }
 
 STYLE = (
@@ -107,6 +135,14 @@ STYLE = (
 )
 
 NEG_PROMPT = "blurry, static, ugly, distorted, low quality, watermark, jitter"
+
+# ── GGUF model filenames ───────────────────────────────────────────────────────
+WAN22_FUN5B_GGUF = "Wan2.2-Fun-5B-InP-Q8_0.gguf"
+WAN22_14B_HIGH   = "Wan2.2-I2V-A14B-HighNoise-Q5_0.gguf"
+WAN22_14B_LOW    = "Wan2.2-I2V-A14B-LowNoise-Q4_0.gguf"
+LTX23_DISTILLED  = "ltx-2.3-22b-distilled-Q4_0.gguf"
+LTX23_TE         = "ltx-2.3-22b-distilled_embeddings_connectors.safetensors"
+LTX23_VAE        = "ltx-2.3-22b-distilled_video_vae.safetensors"
 
 # ── Session state (mutable dicts, safe because only 1 user at a time) ─────────
 _session = {
@@ -236,6 +272,98 @@ def _wf_wan_fun(img_file, prompt, model_name, vae_name, num_frames, scene_id, pr
         "12": {"class_type": "SaveImage",       "inputs": {"images": ["11", 0], "filename_prefix": prefix}},
     }
 
+# ── GGUF workflow builders ─────────────────────────────────────────────────────
+
+def _wf_wan_fun_gguf(img_file, prompt, model_name, vae_name, num_frames, scene_id, prefix):
+    """Wan Fun InP via UnetLoaderGGUF — same nodes as BF16 but GGUF loader."""
+    num_frames = max(5, ((num_frames - 1) // 4) * 4 + 1)
+    return {
+        "1":  {"class_type": "LoadImage",         "inputs": {"image": img_file}},
+        "2":  {"class_type": "UnetLoaderGGUF",    "inputs": {"unet_name": model_name}},
+        "3":  {"class_type": "CLIPLoader",        "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+        "4":  {"class_type": "CLIPVisionLoader",  "inputs": {"clip_name": "clip_vision_h.safetensors"}},
+        "5":  {"class_type": "VAELoader",         "inputs": {"vae_name": vae_name}},
+        "6":  {"class_type": "CLIPVisionEncode",  "inputs": {"clip_vision": ["4", 0], "image": ["1", 0], "crop": "center"}},
+        "7":  {"class_type": "CLIPTextEncode",    "inputs": {"text": prompt + ", smooth motion, high quality, cinematic", "clip": ["3", 0]}},
+        "8":  {"class_type": "CLIPTextEncode",    "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
+        "9":  {"class_type": "WanFunInpaintToVideo",
+               "inputs": {"positive": ["7", 0], "negative": ["8", 0], "vae": ["5", 0],
+                          "width": 832, "height": 480, "length": num_frames,
+                          "batch_size": 1, "clip_vision_output": ["6", 0], "start_image": ["1", 0]}},
+        "10": {"class_type": "KSampler",
+               "inputs": {"model": ["2", 0], "positive": ["9", 0], "negative": ["9", 1],
+                          "latent_image": ["9", 2], "seed": 42 + scene_id,
+                          "steps": 10, "cfg": 5.0, "sampler_name": "euler",
+                          "scheduler": "linear_quadratic", "denoise": 1.0}},
+        "11": {"class_type": "VAEDecode",         "inputs": {"samples": ["10", 0], "vae": ["5", 0]}},
+        "12": {"class_type": "SaveImage",         "inputs": {"images": ["11", 0], "filename_prefix": prefix}},
+    }
+
+
+def _wf_wan22_i2v_gguf(img_file, prompt, high_name, low_name, num_frames, scene_id, prefix):
+    """Wan 2.2 I2V-A14B dual-model GGUF: HighNoise → LowNoise refinement."""
+    num_frames = max(5, ((num_frames - 1) // 4) * 4 + 1)
+    return {
+        "1":  {"class_type": "LoadImage",         "inputs": {"image": img_file}},
+        "3":  {"class_type": "CLIPLoader",        "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+        "4":  {"class_type": "CLIPVisionLoader",  "inputs": {"clip_name": "sigclip_vision_patch14_384.safetensors"}},
+        "5":  {"class_type": "VAELoader",         "inputs": {"vae_name": "wan2.2_vae.safetensors"}},
+        "6":  {"class_type": "CLIPVisionEncode",  "inputs": {"clip_vision": ["4", 0], "image": ["1", 0], "crop": "center"}},
+        "7":  {"class_type": "CLIPTextEncode",    "inputs": {"text": prompt + ", smooth cinematic motion, high quality", "clip": ["3", 0]}},
+        "8":  {"class_type": "CLIPTextEncode",    "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
+        # Stage 1: HighNoise
+        "20": {"class_type": "UnetLoaderGGUF",    "inputs": {"unet_name": high_name}},
+        "21": {"class_type": "WanAnimateToVideo",
+               "inputs": {"positive": ["7", 0], "negative": ["8", 0], "vae": ["5", 0],
+                          "width": 832, "height": 480, "length": num_frames, "batch_size": 1,
+                          "continue_motion_max_frames": 5, "video_frame_offset": 0,
+                          "clip_vision_output": ["6", 0], "reference_image": ["1", 0]}},
+        "22": {"class_type": "KSampler",
+               "inputs": {"model": ["20", 0], "positive": ["21", 0], "negative": ["21", 1],
+                          "latent_image": ["21", 2], "seed": 42 + scene_id,
+                          "steps": 10, "cfg": 5.0, "sampler_name": "euler",
+                          "scheduler": "linear_quadratic", "denoise": 1.0}},
+        # Stage 2: LowNoise refinement
+        "30": {"class_type": "UnetLoaderGGUF",    "inputs": {"unet_name": low_name}},
+        "31": {"class_type": "KSampler",
+               "inputs": {"model": ["30", 0], "positive": ["21", 0], "negative": ["21", 1],
+                          "latent_image": ["22", 0], "seed": 42 + scene_id,
+                          "steps": 10, "cfg": 5.0, "sampler_name": "euler",
+                          "scheduler": "linear_quadratic", "denoise": 0.5}},
+        "40": {"class_type": "VAEDecode",         "inputs": {"samples": ["31", 0], "vae": ["5", 0]}},
+        "41": {"class_type": "SaveImage",         "inputs": {"images": ["40", 0], "filename_prefix": prefix}},
+    }
+
+
+def _wf_ltx23_gguf(img_file, prompt, model_name, te_name, vae_name, num_frames, scene_id, prefix):
+    """LTX-2.3 22B distilled GGUF I2V workflow."""
+    num_frames = max(9, ((num_frames - 9) // 8) * 8 + 9)
+    return {
+        "1":  {"class_type": "LoadImage",            "inputs": {"image": img_file}},
+        "2":  {"class_type": "UnetLoaderGGUF",       "inputs": {"unet_name": model_name}},
+        "3":  {"class_type": "CLIPLoader",           "inputs": {"clip_name": te_name, "type": "ltxv"}},
+        "4":  {"class_type": "VAELoader",            "inputs": {"vae_name": vae_name}},
+        "5":  {"class_type": "CLIPTextEncode",       "inputs": {"text": prompt + ", smooth cinematic motion, high quality, beautiful", "clip": ["3", 0]}},
+        "6":  {"class_type": "CLIPTextEncode",       "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
+        "7":  {"class_type": "LTXVImgToVideo",
+               "inputs": {"positive": ["5", 0], "negative": ["6", 0], "vae": ["4", 0],
+                          "image": ["1", 0], "width": 768, "height": 512,
+                          "length": num_frames, "batch_size": 1, "strength": 1.0}},
+        "8":  {"class_type": "LTXVConditioning",    "inputs": {"positive": ["7", 0], "negative": ["7", 1], "frame_rate": 25.0}},
+        "9":  {"class_type": "LTXVScheduler",
+               "inputs": {"steps": 8, "max_shift": 2.05, "base_shift": 0.95,
+                          "stretch": True, "terminal": 0.1, "latent": ["7", 2]}},
+        "10": {"class_type": "RandomNoise",          "inputs": {"noise_seed": 42 + scene_id}},
+        "11": {"class_type": "BasicGuider",          "inputs": {"model": ["2", 0], "conditioning": ["8", 0]}},
+        "13": {"class_type": "KSamplerSelect",       "inputs": {"sampler_name": "euler"}},
+        "14": {"class_type": "SamplerCustomAdvanced",
+               "inputs": {"noise": ["10", 0], "guider": ["11", 0],
+                          "sampler": ["13", 0], "sigmas": ["9", 0], "latent_image": ["7", 2]}},
+        "15": {"class_type": "VAEDecode",            "inputs": {"samples": ["14", 0], "vae": ["4", 0]}},
+        "12": {"class_type": "SaveImage",            "inputs": {"images": ["15", 0], "filename_prefix": prefix}},
+    }
+
+
 # ── Ken Burns (ffmpeg only, no GPU) ───────────────────────────────────────────
 
 def _kenburns(img_path: Path, audio_path: Path, out: Path, scene_id: int) -> Path:
@@ -337,6 +465,28 @@ def animate_scene(scene_id: int, model_key: str, img_path: Path, audio_path: Pat
             return None, "Wan Fun 1.3B model not downloaded"
         wf = _wf_wan_fun(img_file, prompt, mp.name, "wan_2.1_vae.safetensors",
                          num_frames=81, scene_id=scene_id, prefix=prefix)
+    elif model_key == "wan22-fun-5b-gguf":
+        mp = COMFYUI_DIR / "models" / "diffusion_models" / WAN22_FUN5B_GGUF
+        if not mp.exists():
+            return None, f"{WAN22_FUN5B_GGUF} not downloaded yet"
+        wf = _wf_wan_fun_gguf(img_file, prompt, mp.name, "wan2.2_vae.safetensors",
+                              num_frames=81, scene_id=scene_id, prefix=prefix)
+    elif model_key == "wan22-i2v-14b-gguf":
+        high = COMFYUI_DIR / "models" / "diffusion_models" / WAN22_14B_HIGH
+        low  = COMFYUI_DIR / "models" / "diffusion_models" / WAN22_14B_LOW
+        if not high.exists() or not low.exists():
+            return None, "Wan2.2 I2V-A14B GGUF files not downloaded yet"
+        wf = _wf_wan22_i2v_gguf(img_file, prompt, high.name, low.name,
+                                 num_frames=33, scene_id=scene_id, prefix=prefix)
+    elif model_key == "ltx23-gguf":
+        mp  = COMFYUI_DIR / "models" / "diffusion_models" / LTX23_DISTILLED
+        te  = COMFYUI_DIR / "models" / "text_encoders" / LTX23_TE
+        if not mp.exists():
+            return None, f"{LTX23_DISTILLED} not downloaded yet"
+        if not te.exists():
+            return None, f"{LTX23_TE} not downloaded yet"
+        wf = _wf_ltx23_gguf(img_file, prompt, mp.name, LTX23_TE, LTX23_VAE,
+                             num_frames=97, scene_id=scene_id, prefix=prefix)
     else:
         return None, f"Unknown model: {model_key}"
 
@@ -550,21 +700,22 @@ def assemble_video(scenes: list, out_path: Path) -> Path:
 
 def check_model_availability():
     status = {}
-    # Ken Burns — always available
     status["ken-burns"] = True
 
-    # ComfyUI models
     comfy_up = comfyui_running()
-    ltx2b = (COMFYUI_DIR / "models" / "checkpoints" / "ltxv-2b-0.9.8-distilled-fp8.safetensors").exists()
-    ltx13b = (COMFYUI_DIR / "models" / "checkpoints" / "ltxv-13b-0.9.8-distilled-fp8.safetensors").exists()
-    wan5b  = (COMFYUI_DIR / "models" / "diffusion_models" / "wan2.2_fun_inpaint_5B_bf16.safetensors").exists()
-    wan1b  = (COMFYUI_DIR / "models" / "diffusion_models" / "wan2.1_fun_inp_1.3B_bf16.safetensors").exists()
+    dm = COMFYUI_DIR / "models" / "diffusion_models"
+    ck = COMFYUI_DIR / "models" / "checkpoints"
+    te = COMFYUI_DIR / "models" / "text_encoders"
 
-    status["ltx-2b"]      = comfy_up and ltx2b
-    status["ltx-13b"]     = comfy_up and ltx13b
-    status["wan22-fun-5b"]= comfy_up and wan5b
-    status["wan-fun-1b"]  = comfy_up and wan1b
-    status["mlx-ltx2"]    = Path(MLX_PYTHON).exists()
+    status["ltx-2b"]            = comfy_up and (ck / "ltxv-2b-0.9.8-distilled-fp8.safetensors").exists()
+    status["ltx-13b"]           = comfy_up and (ck / "ltxv-13b-0.9.8-distilled-fp8.safetensors").exists()
+    status["wan22-fun-5b"]      = comfy_up and (dm / "wan2.2_fun_inpaint_5B_bf16.safetensors").exists()
+    status["wan-fun-1b"]        = comfy_up and (dm / "wan2.1_fun_inp_1.3B_bf16.safetensors").exists()
+    status["mlx-ltx2"]          = Path(MLX_PYTHON).exists()
+    # GGUF models
+    status["wan22-fun-5b-gguf"] = comfy_up and (dm / WAN22_FUN5B_GGUF).exists()
+    status["wan22-i2v-14b-gguf"]= comfy_up and (dm / WAN22_14B_HIGH).exists() and (dm / WAN22_14B_LOW).exists()
+    status["ltx23-gguf"]        = comfy_up and (dm / LTX23_DISTILLED).exists() and (te / LTX23_TE).exists()
 
     return status, comfy_up
 
@@ -1013,7 +1164,10 @@ Useful for model comparison — animate the same scene with different models.
 | **Ken Burns** | Instant | ★★ | Previews, any machine, zero GPU |
 | **LTX 2B** | ~40s | ★★★ | Fast iteration, batch rendering |
 | **LTX 13B** | ~11min | ★★★★ | Final renders, aerial landscapes |
-| **Wan 2.2 Fun 5B** | ~12min | ★★★★ | Objects in motion (coins, dice, falling items) |
+| **LTX-2.3 22B GGUF** ✨ | ~4-6min | ★★★★ | Newest LTX, speed+quality balance |
+| **Wan 2.2 Fun 5B** | ~12min | ★★★★ | Objects in motion (BF16 original) |
+| **Wan 2.2 Fun 5B GGUF** ✨ | ~8-10min | ★★★★ | Objects in motion, stabler than BF16 |
+| **Wan 2.2 I2V-A14B GGUF** ✨ | ~15-20min | ★★★★★ | Best quality, hero scenes |
 | **Wan Fun 1.3B** | ~44min | ★★★ | Start-frame fidelity on lighter load |
 | **MLX LTX-2** | ~30min | ★★★ | Native Apple Silicon, no ComfyUI needed |
 
