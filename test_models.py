@@ -484,17 +484,66 @@ def test_ltx23_gguf(img_path: Path, prompt: str, scene_id: int) -> Path:
 
 # ── Model registry ────────────────────────────────────────────────────────────
 
+WAN_TI2V_MLX_DIR = Path("/Volumes/bujji1/sravya/ai_vidgen/models/Wan2.2-TI2V-5B-MLX-Q4")
+
+
+def test_wan22_ti2v_mlx(img_path: Path, prompt: str, scene_id: int) -> Path:
+    """Wan2.2-TI2V-5B native MLX — pure Apple Silicon, no ComfyUI.
+    Requires convert step (run download_wan_ti2v.py first, ~10 GB download).
+    Uses mlx-video Wan2 implementation. Steps=10 for fast iteration."""
+    out = TEST_DIR / "wan22-ti2v-5b-mlx.mp4"
+    if not WAN_TI2V_MLX_DIR.exists():
+        print(f"    {WAN_TI2V_MLX_DIR} not found — run download script first")
+        return None
+    if not Path(MLX_PYTHON).exists():
+        print("    mlx-video venv not found — skip")
+        return None
+
+    script = f"""
+import sys
+try:
+    from mlx_video.models.wan_2.generate import generate_video
+except ImportError as e:
+    print(f"Import error: {{e}}", flush=True)
+    sys.exit(1)
+generate_video(
+    model_dir={str(WAN_TI2V_MLX_DIR)!r},
+    prompt={prompt!r},
+    negative_prompt="blurry, distorted, low quality, ugly, static, watermark",
+    image={str(img_path)!r},
+    width=832, height=480,
+    num_frames=25,
+    steps=10,
+    guide_scale=(3.0, 3.0),
+    seed={42 + scene_id},
+    output_path={str(out)!r},
+    scheduler="unipc",
+)
+"""
+    print(f"    Wan2.2-TI2V-5B MLX (pure Apple Silicon, 10 steps)...")
+    result = subprocess.run(
+        [MLX_PYTHON, "-c", script],
+        capture_output=True, text=True, timeout=7200,
+    )
+    if result.returncode == 0 and out.exists() and out.stat().st_size > 10_000:
+        return out
+    print(f"    Wan2.2-TI2V-5B MLX failed (exit {result.returncode})")
+    print(result.stderr[-400:])
+    return None
+
+
 ALL_MODELS = {
-    "ltx-2b":            ("ComfyUI", test_ltx_2b),
-    "ltx-13b":           ("ComfyUI", test_ltx_13b),
-    "ltx23-gguf":        ("ComfyUI", test_ltx23_gguf),
-    "wan-fun-1b":        ("ComfyUI", test_wan_fun_1b),
-    "wan22-fun-5b":      ("ComfyUI", test_wan22_fun_5b),
-    "wan22-fun-5b-gguf": ("ComfyUI", test_wan22_fun5b_gguf),
-    "wan22-i2v-14b-gguf":("ComfyUI", test_wan22_i2v_14b_gguf),
-    "wan22-low":         ("ComfyUI", test_wan22_low),
-    "wan22-high":        ("ComfyUI", test_wan22_high),
-    "mlx-ltx2":          ("MLX",    test_mlx_ltx2),
+    "ltx-2b":              ("ComfyUI", test_ltx_2b),
+    "ltx-13b":             ("ComfyUI", test_ltx_13b),
+    "ltx23-gguf":          ("ComfyUI", test_ltx23_gguf),
+    "wan-fun-1b":          ("ComfyUI", test_wan_fun_1b),
+    "wan22-fun-5b":        ("ComfyUI", test_wan22_fun_5b),
+    "wan22-fun-5b-gguf":   ("ComfyUI", test_wan22_fun5b_gguf),
+    "wan22-i2v-14b-gguf":  ("ComfyUI", test_wan22_i2v_14b_gguf),
+    "wan22-low":           ("ComfyUI", test_wan22_low),
+    "wan22-high":          ("ComfyUI", test_wan22_high),
+    "mlx-ltx2":            ("MLX",    test_mlx_ltx2),
+    "wan22-ti2v-5b-mlx":   ("MLX",    test_wan22_ti2v_mlx),
 }
 
 # ── Main ──────────────────────────────────────────────────────────────────────

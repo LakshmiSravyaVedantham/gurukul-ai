@@ -97,6 +97,16 @@ MODELS = {
         "desc":    "prince-canuma/LTX-2-distilled running natively on Apple Silicon via mlx-video. Doesn't need ComfyUI. Uses ~36 GB RAM — close to the 36 GB limit.",
         "badge":   "NO COMFYUI",
     },
+    # ── MLX native models ────────────────────────────────────────────────────
+    "wan22-ti2v-5b-mlx": {
+        "label":   "Wan 2.2 TI2V-5B MLX (native Apple Silicon)",
+        "engine":  "MLX",
+        "time":    "~TBD (benchmarking)",
+        "quality": "★★★★☆",
+        "best_for": "Fast MLX I2V without ComfyUI — fits 36GB",
+        "desc":    "Wan2.2-TI2V-5B converted to MLX Q4 (~2.5 GB). Runs natively on Apple Silicon via mlx-video. No ComfyUI needed. Requires one-time convert from PyTorch (~10 GB download).",
+        "badge":   "MLX NATIVE",
+    },
     # ── NEW GGUF models ──────────────────────────────────────────────────────
     "wan22-fun-5b-gguf": {
         "label":   "Wan 2.2 Fun 5B GGUF (faster, stabler)",
@@ -436,6 +446,9 @@ def animate_scene(scene_id: int, model_key: str, img_path: Path, audio_path: Pat
     if model_key == "mlx-ltx2":
         return _animate_mlx(scene_id, img_path, out)
 
+    if model_key == "wan22-ti2v-5b-mlx":
+        return _animate_wan_ti2v_mlx(scene_id, img_path, out)
+
     # ComfyUI models
     if not comfyui_running():
         return None, "ComfyUI not running on port 8288"
@@ -495,6 +508,42 @@ def animate_scene(scene_id: int, model_key: str, img_path: Path, audio_path: Pat
         return _wait_comfy_job(r["prompt_id"], prefix, out)
     except Exception as e:
         return None, str(e)
+
+def _animate_wan_ti2v_mlx(scene_id: int, img_path: Path, out: Path) -> tuple:
+    """Wan2.2-TI2V-5B native MLX I2V — no ComfyUI."""
+    model_dir = Path("/Volumes/bujji1/sravya/ai_vidgen/models/Wan2.2-TI2V-5B-MLX-Q4")
+    if not model_dir.exists():
+        return None, "Wan2.2-TI2V-5B-MLX-Q4 not found. Run the download+convert script first."
+    prompt = _default_anim_prompt(scene_id) + ", smooth cinematic motion, high quality, Pixar style"
+    script = f"""
+import sys
+try:
+    from mlx_video.models.wan_2.generate import generate_video
+except ImportError as e:
+    print(f"Import error: {{e}}", flush=True)
+    sys.exit(1)
+generate_video(
+    model_dir={str(model_dir)!r},
+    prompt={prompt!r},
+    negative_prompt="blurry, distorted, low quality, ugly, static, watermark",
+    image={str(img_path)!r},
+    width=832, height=480,
+    num_frames=25,
+    steps=10,
+    guide_scale=(3.0, 3.0),
+    seed={42 + scene_id},
+    output_path={str(out)!r},
+    scheduler="unipc",
+)
+"""
+    r = subprocess.run(
+        [MLX_PYTHON, "-c", script],
+        capture_output=True, text=True, timeout=7200,
+    )
+    if r.returncode == 0 and out.exists():
+        return out, None
+    return None, r.stderr[-500:]
+
 
 def _animate_mlx(scene_id: int, img_path: Path, out: Path) -> tuple:
     prompt = _default_anim_prompt(scene_id) + ", smooth cinematic motion, high quality, cinematic"
@@ -712,6 +761,8 @@ def check_model_availability():
     status["wan22-fun-5b"]      = comfy_up and (dm / "wan2.2_fun_inpaint_5B_bf16.safetensors").exists()
     status["wan-fun-1b"]        = comfy_up and (dm / "wan2.1_fun_inp_1.3B_bf16.safetensors").exists()
     status["mlx-ltx2"]          = Path(MLX_PYTHON).exists()
+    wan_ti2v_dir = Path("/Volumes/bujji1/sravya/ai_vidgen/models/Wan2.2-TI2V-5B-MLX-Q4")
+    status["wan22-ti2v-5b-mlx"] = wan_ti2v_dir.exists() and any(wan_ti2v_dir.iterdir())
     # GGUF models
     status["wan22-fun-5b-gguf"] = comfy_up and (dm / WAN22_FUN5B_GGUF).exists()
     status["wan22-i2v-14b-gguf"]= comfy_up and (dm / WAN22_14B_HIGH).exists() and (dm / WAN22_14B_LOW).exists()
