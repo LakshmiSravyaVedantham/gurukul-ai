@@ -3,7 +3,7 @@
 > Fully local, free, Apple Silicon. No cloud APIs needed.
 > Generates Pixar-style animated educational videos end-to-end.
 
-**🌐 [gurukul-ai.vercel.app](https://web-five-lime-42.vercel.app)** &nbsp;|&nbsp; **▶️ [YouTube Channel](https://www.youtube.com/@GurukuIAI)**
+**🌐 [gurukul-ai.vercel.app](https://web-five-lime-42.vercel.app)** &nbsp;|&nbsp; 
 
 ## Pipeline Overview
 
