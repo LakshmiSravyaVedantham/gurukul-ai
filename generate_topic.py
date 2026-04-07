@@ -22,6 +22,13 @@ MLX_PYTHON   = "/Volumes/bujji1/sravya/ai_vidgen/venv/bin/python"
 GEMMA_MODEL  = "mlx-community/gemma-3-4b-it-4bit"
 TEMPLATE     = Path(__file__).parent / "gurukul_island.py"
 
+# Import web research (optional — degrades gracefully if offline)
+try:
+    from web_research import research_topic as _research_topic
+    _HAS_RESEARCH = True
+except ImportError:
+    _HAS_RESEARCH = False
+
 # ── System prompt ─────────────────────────────────────────────────────────────
 
 SYSTEM = textwrap.dedent("""
@@ -72,9 +79,11 @@ Return a JSON object with this exact structure:
 """).strip()
 
 
-def _run_gemma(topic: str) -> str:
+def _run_gemma(topic: str, research_context: str = "") -> str:
     """Run Gemma via mlx-lm and return the raw output string."""
     user_prompt = PROMPT_TEMPLATE.format(topic=topic)
+    if research_context:
+        user_prompt = research_context + "\n\nUse the facts above to make the episode accurate.\n\n" + user_prompt
 
     # Build the chat messages as JSON for mlx-lm
     messages = json.dumps([
@@ -199,6 +208,7 @@ def main():
     ap.add_argument("topic", help='e.g. "fractions", "geometry", "multiplication"')
     ap.add_argument("--out", default=None, help="Output .py file (default: gurukul_<topic>.py)")
     ap.add_argument("--preview", action="store_true", help="Print scenes without writing file")
+    ap.add_argument("--no-research", action="store_true", help="Skip web research stage (faster, offline)")
     args = ap.parse_args()
 
     topic = args.topic.strip()
@@ -207,7 +217,17 @@ def main():
     print(f"Generating '{topic}' episode with Gemma ({GEMMA_MODEL})...")
     print("First run downloads ~2.5 GB model — subsequent runs are instant.\n")
 
-    raw = _run_gemma(topic)
+    # Stage 0: Web research (free, no API key)
+    research_context = ""
+    if _HAS_RESEARCH and not args.no_research:
+        print("Stage 0: Researching topic online...")
+        try:
+            research_context = _research_topic(topic, num_facts=8, verbose=True)
+            print(f"\n{research_context}\n")
+        except Exception as e:
+            print(f"  Research failed ({e}), continuing without it.")
+
+    raw = _run_gemma(topic, research_context)
 
     try:
         data = _extract_json(raw)

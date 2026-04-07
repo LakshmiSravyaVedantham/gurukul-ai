@@ -1162,6 +1162,65 @@ All models run locally on your Mac Studio M4 Max. No internet needed after first
             outputs=[assemble_log, final_video],
         )
 
+    # ── Tab: Subtitles ────────────────────────────────────────────────────────
+    with gr.Tab("6. Subtitles"):
+        gr.Markdown("""
+## Auto Word-Level Subtitles (free, Apple Silicon)
+Transcribes the video with **mlx-whisper** (Whisper Small, runs fully local),
+then burns in karaoke-style word highlighting — current word in **yellow**, rest white.
+No OpenAI API key. No internet needed after first model download (~150 MB).
+        """)
+        with gr.Row():
+            sub_video_in = gr.Video(label="Input Video", height=300)
+        with gr.Row():
+            sub_model    = gr.Dropdown(
+                ["mlx-community/whisper-small-mlx", "mlx-community/whisper-medium-mlx",
+                 "mlx-community/whisper-large-v3-mlx"],
+                value="mlx-community/whisper-small-mlx",
+                label="Whisper model (larger = more accurate, slower)",
+            )
+            sub_srt_only = gr.Checkbox(label="SRT only (no burn-in)", value=False)
+        sub_btn = gr.Button("🔤 Add Subtitles", variant="primary")
+        sub_log = gr.Markdown()
+        sub_out = gr.Video(label="Video with Subtitles", height=400)
+
+        def _run_subtitles(video_path, whisper_model, srt_only):
+            if not video_path:
+                yield "Upload a video first.", None
+                return
+            yield "Loading mlx-whisper and transcribing...", None
+            try:
+                import importlib, sys as _sys
+                # Update WHISPER_MODEL if sub module already loaded
+                if "subtitles" in _sys.modules:
+                    _sys.modules["subtitles"].WHISPER_MODEL = whisper_model
+                    importlib.reload(_sys.modules["subtitles"])
+                from subtitles import add_subtitles, WHISPER_MODEL as _wm
+                import subtitles as _sub_mod
+                _sub_mod.WHISPER_MODEL = whisper_model
+
+                out_suffix = ".srt" if srt_only else "_subtitled.mp4"
+                out = Path(video_path).with_suffix(out_suffix)
+                result = add_subtitles(
+                    video_path=video_path,
+                    out_path=str(out) if not srt_only else None,
+                    ass_only=False,
+                    srt=srt_only,
+                )
+                if srt_only:
+                    yield f"SRT saved: `{result}`", None
+                else:
+                    size = result.stat().st_size / 1024 / 1024
+                    yield f"Done! `{result.name}` ({size:.1f} MB)", str(result)
+            except Exception as e:
+                yield f"Error: {e}", None
+
+        sub_btn.click(
+            _run_subtitles,
+            inputs=[sub_video_in, sub_model, sub_srt_only],
+            outputs=[sub_log, sub_out],
+        )
+
     # ── Tab: Quick Test ───────────────────────────────────────────────────────
     with gr.Tab("Quick Test (1 Scene)"):
         gr.Markdown("""
