@@ -8,60 +8,48 @@
 ## Pipeline Overview
 
 ```mermaid
-flowchart TD
-    subgraph Stage0["Stage 0 — Research"]
-        R[🌐 web_research.py\nDuckDuckGo + Wikipedia\nno API key needed]
+flowchart LR
+    TOPIC([🎯 Topic]) --> RESEARCH
+
+    RESEARCH[🌐 Research\nDuckDuckGo + Wikipedia]
+    RESEARCH --> SCRIPT
+
+    SCRIPT[🧠 Script\nGemma 3 4B\n10 scenes]
+    SCRIPT --> IMAGES
+    SCRIPT --> AUDIO
+
+    IMAGES[🖼️ Images\nFLUX Dev\n1360x768]
+    AUDIO{TTS}
+    AUDIO -->|free| KOKORO[🔊 Kokoro\nlocal]
+    AUDIO -->|cloud| ELEVEN[☁️ ElevenLabs]
+
+    IMAGES --> ANIM
+    KOKORO --> ANIM
+    ELEVEN --> ANIM
+
+    ANIM{Animation\nModel}
+    ANIM -->|instant| KB[Ken Burns\nffmpeg]
+    ANIM -->|fast| LTX2[LTX 2B\n~40s]
+    ANIM -->|balanced| WAN5[Wan2.2 Fun-5B\nGGUF]
+    ANIM -->|best| WAN14[Wan2.2 I2V-A14B\nGGUF]
+
+    KB & LTX2 & WAN5 & WAN14 --> ASSEMBLE
+
+    ASSEMBLE[🎞️ Assemble\nxfade transitions]
+    ASSEMBLE --> SUBTITLES
+    SUBTITLES[🔤 Subtitles\nmlx-whisper\nword-level]
+    SUBTITLES --> FINAL([📹 Final Video])
+
+    WAN5 & WAN14 -.->|selfimprove| SI
+
+    subgraph SI [⚡ selfimprove]
+        direction LR
+        DIR[Gemma 4\nDirector] --> CRIT[Qwen2.5-VL\nCritic]
+        CRIT -->|score lt 7| REF[Refiner\nescalate model]
+        CRIT -->|score ge 7| POL[Topaz\n4K upscale]
     end
 
-    subgraph Stage1["Stage 1 — Script"]
-        G[🧠 Gemma 3 4B\nmlx-lm · Apple Silicon\n10-scene island script]
-    end
-
-    subgraph Stage2["Stage 2 — Images"]
-        F[🖼️ FLUX Dev\nmflux · Apple Silicon\n1360×768 per scene]
-    end
-
-    subgraph Stage3["Stage 3 — Audio"]
-        TTS{API key set?}
-        TTS -- Yes --> E[☁️ ElevenLabs\nDaniel voice]
-        TTS -- No  --> K[🔊 Kokoro TTS\nfully local · free]
-    end
-
-    subgraph Stage4["Stage 4 — Animation"]
-        C{ComfyUI\nrunning?}
-        C -- LTX 2B    --> V1[⚡ LTX Video 2B\n~40s/scene]
-        C -- LTX 13B   --> V2[🎬 LTX Video 13B\n~11min/scene]
-        C -- LTX 2.3   --> V3[✨ LTX-2.3 22B GGUF\n~4-6min/scene]
-        C -- Wan Fun5B --> V4[🌊 Wan2.2 Fun-5B GGUF\n~8-10min/scene]
-        C -- Wan I2V   --> V5[🏆 Wan2.2 I2V-A14B GGUF\n~15-20min/scene]
-        C -- No        --> KB[🎞️ Ken Burns\nffmpeg · instant]
-    end
-
-    subgraph Stage5["Stage 5 — Self-Improve ⚡"]
-        D[🎭 Director\nGemma 4 26B\ncinematic prompt expansion]
-        CR[🔍 Critic\nQwen2.5-VL 7B\nvideo scoring 1-10]
-        RF[🔄 Refiner\nauto-escalate model\nif score below threshold]
-        P[✨ Polisher\nTopaz Video AI\n4K upscale]
-        D --> CR --> RF --> P
-    end
-
-    subgraph Stage6["Stage 6 — Post-Process"]
-        SUB[🔤 subtitles.py\nmlx-whisper\nword-level captions]
-        XF[🎞️ xfade transitions\nffmpeg dissolve/wipe\nbetween scenes]
-    end
-
-    R --> G
-    G --> F
-    G --> TTS
-    F --> C
-    K --> C
-    E --> C
-    V1 & V2 & V3 & V4 & V5 & KB --> XF
-    XF --> SUB
-    SUB --> OUT[📹 Final Video\n1280×720 MP4]
-
-    V1 & V2 & V3 & V4 & V5 --> Stage5
-    Stage5 --> LB[📊 Model Leaderboard\n+ Training Dataset]
+    SI -.-> LB[(📊 Leaderboard\n+ Dataset)]
 ```
 
 ## Features
