@@ -118,12 +118,21 @@ MODELS = {
         "badge":   "GGUF UPGRADE",
     },
     "wan22-i2v-14b-gguf": {
-        "label":   "Wan 2.2 I2V-A14B GGUF (best quality)",
+        "label":   "Wan 2.2 I2V-A14B GGUF",
         "engine":  "ComfyUI",
         "time":    "~15-20min/scene",
         "quality": "★★★★★",
         "best_for": "Hero scenes, maximum quality finals",
-        "desc":    "Wan 2.2 I2V 14B dual-model (HighNoise Q5_0 + LowNoise Q4_0) via GGUF loader. Previously failed with safetensors channel mismatch — GGUF bypasses this. Best-in-class motion quality.",
+        "desc":    "Wan 2.2 I2V 14B dual-model (HighNoise Q5_0 + LowNoise Q4_0) via GGUF loader. Best-in-class motion quality.",
+        "badge":   "HIGH QUALITY",
+    },
+    "skyreels-v2-gguf": {
+        "label":   "SkyReels-V2 I2V-14B GGUF (best quality)",
+        "engine":  "ComfyUI",
+        "time":    "~10-15min/scene",
+        "quality": "★★★★★",
+        "best_for": "All scenes — benchmarks above Wan2.1-I2V, approaching Kling/Runway quality",
+        "desc":    "SkyReels-V2 I2V 14B Q5_K_M GGUF. Built on Wan backbone with superior motion training. Single-pass (faster than Wan2.2 dual-model). Uses ViT-H clip_vision + wan_2.1_vae.",
         "badge":   "BEST QUALITY",
     },
     "ltx23-gguf": {
@@ -324,7 +333,7 @@ def _wf_wan22_i2v_gguf(img_file, prompt, high_name, low_name, num_frames, scene_
         "1":  {"class_type": "LoadImage",         "inputs": {"image": img_file}},
         "3":  {"class_type": "CLIPLoader",        "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
         "4":  {"class_type": "CLIPVisionLoader",  "inputs": {"clip_name": "sigclip_vision_patch14_384.safetensors"}},
-        "5":  {"class_type": "VAELoader",         "inputs": {"vae_name": "wan2.2_vae.safetensors"}},
+        "5":  {"class_type": "VAELoader",         "inputs": {"vae_name": "wan_2.1_vae.safetensors"}},
         "6":  {"class_type": "CLIPVisionEncode",  "inputs": {"clip_vision": ["4", 0], "image": ["1", 0], "crop": "center"}},
         "7":  {"class_type": "CLIPTextEncode",    "inputs": {"text": pos_prompt, "clip": ["3", 0]}},
         "8":  {"class_type": "CLIPTextEncode",    "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
@@ -349,6 +358,39 @@ def _wf_wan22_i2v_gguf(img_file, prompt, high_name, low_name, num_frames, scene_
                           "scheduler": "linear_quadratic", "denoise": 0.45}},
         "40": {"class_type": "VAEDecode",         "inputs": {"samples": ["31", 0], "vae": ["5", 0]}},
         "41": {"class_type": "SaveImage",         "inputs": {"images": ["40", 0], "filename_prefix": prefix}},
+    }
+
+
+SKYREELS_V2_GGUF = "Skywork-SkyReels-V2-I2V-14B-540P-Q5_K_M.gguf"
+
+def _wf_skyreels_v2_gguf(img_file, prompt, model_name, num_frames, scene_id, prefix):
+    """SkyReels-V2 I2V-14B GGUF — single-pass I2V, same Wan backbone.
+    Uses clip_vision_h.safetensors (ViT-H, not sigclip), wan_2.1_vae, umt5 text encoder.
+    Benchmarks above Wan2.1-I2V with better motion quality.
+    """
+    num_frames = max(5, ((num_frames - 1) // 4) * 4 + 1)
+    pos_prompt = (prompt + ", smooth cinematic motion, high quality, vibrant colors, "
+                  "Pixar animated style, golden warm light, beautiful composition")
+    return {
+        "1":  {"class_type": "LoadImage",        "inputs": {"image": img_file}},
+        "3":  {"class_type": "CLIPLoader",       "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
+        "4":  {"class_type": "CLIPVisionLoader", "inputs": {"clip_name": "clip_vision_h.safetensors"}},
+        "5":  {"class_type": "VAELoader",        "inputs": {"vae_name": "wan_2.1_vae.safetensors"}},
+        "6":  {"class_type": "CLIPVisionEncode", "inputs": {"clip_vision": ["4", 0], "image": ["1", 0], "crop": "center"}},
+        "7":  {"class_type": "CLIPTextEncode",   "inputs": {"text": pos_prompt, "clip": ["3", 0]}},
+        "8":  {"class_type": "CLIPTextEncode",   "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
+        "9":  {"class_type": "WanImageToVideo",
+               "inputs": {"positive": ["7", 0], "negative": ["8", 0], "vae": ["5", 0],
+                          "width": 960, "height": 544, "length": num_frames, "batch_size": 1,
+                          "clip_vision_output": ["6", 0], "start_image": ["1", 0]}},
+        "20": {"class_type": "UnetLoaderGGUF",   "inputs": {"unet_name": model_name}},
+        "22": {"class_type": "KSampler",
+               "inputs": {"model": ["20", 0], "positive": ["9", 0], "negative": ["9", 1],
+                          "latent_image": ["9", 2], "seed": 42 + scene_id,
+                          "steps": 20, "cfg": 6.0, "sampler_name": "euler",
+                          "scheduler": "beta", "denoise": 1.0}},
+        "40": {"class_type": "VAEDecode",        "inputs": {"samples": ["22", 0], "vae": ["5", 0]}},
+        "41": {"class_type": "SaveImage",        "inputs": {"images": ["40", 0], "filename_prefix": prefix}},
     }
 
 
@@ -451,19 +493,60 @@ ANIMATION_PROMPTS = {
 def _default_anim_prompt(scene_id: int) -> str:
     return ANIMATION_PROMPTS.get(scene_id, "smooth cinematic motion, beautiful scene, golden light")
 
+
+def _ensure_min_duration(path: Path, min_seconds: float = 8.0) -> Path:
+    """Loop video until it is at least min_seconds long. Returns path unchanged on failure."""
+    if path is None or not path.exists():
+        return path
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(path)],
+            capture_output=True, text=True,
+        )
+        data = json.loads(r.stdout)
+        duration = float(next(
+            s["duration"] for s in data.get("streams", []) if s.get("duration")
+        ))
+    except Exception:
+        return path
+    if duration >= min_seconds:
+        return path
+    loops = max(int(min_seconds / duration), 1)
+    tmp = path.with_suffix(".tmp.mp4")
+    cmd = [
+        "ffmpeg", "-y",
+        "-stream_loop", str(loops), "-i", str(path),
+        "-c", "copy", "-t", str(min_seconds),
+        str(tmp),
+    ]
+    r = subprocess.run(cmd, capture_output=True)
+    if r.returncode == 0:
+        tmp.replace(path)
+    else:
+        tmp.unlink(missing_ok=True)
+    return path
+
 def animate_scene(scene_id: int, model_key: str, img_path: Path, audio_path: Path) -> tuple:
     """Returns (out_path, error_msg)."""
     out = CLIPS_DIR / f"scene_{scene_id:02d}.mp4"
 
     if model_key == "ken-burns":
         result = _kenburns(img_path, audio_path, out, scene_id)
+        if result:
+            _ensure_min_duration(result)
         return (result, None) if result else (None, "ffmpeg Ken Burns failed")
 
     if model_key == "mlx-ltx2":
-        return _animate_mlx(scene_id, img_path, out)
+        path, err = _animate_mlx(scene_id, img_path, out)
+        if path:
+            _ensure_min_duration(path)
+        return path, err
 
     if model_key == "wan22-ti2v-5b-mlx":
-        return _animate_wan_ti2v_mlx(scene_id, img_path, out)
+        path, err = _animate_wan_ti2v_mlx(scene_id, img_path, out)
+        if path:
+            _ensure_min_duration(path)
+        return path, err
 
     # ComfyUI models
     if not comfyui_running():
@@ -507,6 +590,12 @@ def animate_scene(scene_id: int, model_key: str, img_path: Path, audio_path: Pat
             return None, "Wan2.2 I2V-A14B GGUF files not downloaded yet"
         wf = _wf_wan22_i2v_gguf(img_file, prompt, high.name, low.name,
                                  num_frames=33, scene_id=scene_id, prefix=prefix)
+    elif model_key == "skyreels-v2-gguf":
+        mp = COMFYUI_DIR / "models" / "diffusion_models" / SKYREELS_V2_GGUF
+        if not mp.exists():
+            return None, f"{SKYREELS_V2_GGUF} not downloaded yet"
+        wf = _wf_skyreels_v2_gguf(img_file, prompt, mp.name,
+                                   num_frames=49, scene_id=scene_id, prefix=prefix)
     elif model_key == "ltx23-gguf":
         mp     = COMFYUI_DIR / "models" / "diffusion_models" / LTX23_DISTILLED
         te     = COMFYUI_DIR / "models" / "text_encoders"    / LTX23_TE
@@ -524,7 +613,10 @@ def animate_scene(scene_id: int, model_key: str, img_path: Path, audio_path: Pat
 
     try:
         r = _comfy_post("/prompt", {"prompt": wf})
-        return _wait_comfy_job(r["prompt_id"], prefix, out)
+        path, err = _wait_comfy_job(r["prompt_id"], prefix, out)
+        if path:
+            _ensure_min_duration(path)
+        return path, err
     except Exception as e:
         return None, str(e)
 
@@ -785,6 +877,7 @@ def check_model_availability():
     # GGUF models
     status["wan22-fun-5b-gguf"] = comfy_up and (dm / WAN22_FUN5B_GGUF).exists()
     status["wan22-i2v-14b-gguf"]= comfy_up and (dm / WAN22_14B_HIGH).exists() and (dm / WAN22_14B_LOW).exists()
+    status["skyreels-v2-gguf"]  = comfy_up and (dm / SKYREELS_V2_GGUF).exists()
     status["ltx23-gguf"]        = comfy_up and (dm / LTX23_DISTILLED).exists() and (te / LTX23_TE).exists() and (te / LTX23_GEMMA).exists()
 
     return status, comfy_up

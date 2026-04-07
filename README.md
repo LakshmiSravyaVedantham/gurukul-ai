@@ -31,16 +31,17 @@ flowchart LR
     ANIM -->|instant| KB[Ken Burns\nffmpeg]
     ANIM -->|fast| LTX2[LTX 2B\n~40s]
     ANIM -->|balanced| WAN5[Wan2.2 Fun-5B\nGGUF]
-    ANIM -->|best| WAN14[Wan2.2 I2V-A14B\nGGUF]
+    ANIM -->|quality| WAN14[Wan2.2 I2V-A14B\nGGUF dual-model]
+    ANIM -->|best| SKY[SkyReels-V2\nI2V-14B GGUF]
 
-    KB & LTX2 & WAN5 & WAN14 --> ASSEMBLE
+    KB & LTX2 & WAN5 & WAN14 & SKY --> ASSEMBLE
 
     ASSEMBLE[🎞️ Assemble\nxfade transitions]
     ASSEMBLE --> SUBTITLES
     SUBTITLES[🔤 Subtitles\nmlx-whisper\nword-level]
     SUBTITLES --> FINAL([📹 Final Video])
 
-    WAN5 & WAN14 -.->|selfimprove| SI
+    WAN5 & WAN14 & SKY -.->|selfimprove| SI
 
     subgraph SI [⚡ selfimprove]
         direction LR
@@ -60,7 +61,7 @@ flowchart LR
 | Topic research | DuckDuckGo + Wikipedia | Free |
 | Image generation | FLUX Dev (mflux) | Free |
 | Narration TTS | Kokoro am_adam | Free |
-| Animation | LTX 2B / LTX 13B / LTX-2.3 / Wan2.2 Fun / Wan2.2 I2V | Free |
+| Animation | LTX 2B / LTX 13B / LTX-2.3 / Wan2.2 Fun / Wan2.2 I2V / SkyReels-V2 | Free |
 | Prompt expansion | Gemma 4 26B (mlx-lm) | Free |
 | Video scoring | Qwen2.5-VL 7B (mlx-vlm) | Free |
 | Word subtitles | mlx-whisper (Whisper Small) | Free |
@@ -75,7 +76,7 @@ flowchart LR
 Director (Gemma 4) → Creator → Critic (Qwen2.5-VL scores 1-10) → Refiner → Polisher (Topaz 4K)
 ```
 
-Escalation order: `LTX-2B → LTX-2.3 GGUF → Wan2.2 Fun-5B GGUF → LTX-13B → Wan2.2 I2V-A14B GGUF`
+Escalation order: `LTX-2B → Wan2.2 Fun-5B GGUF → LTX-13B → Wan2.2 I2V-A14B GGUF → SkyReels-V2 I2V-14B GGUF`
 
 ```bash
 # Single model
@@ -115,7 +116,8 @@ cd /path/to/ComfyUI && python main.py --port 8288 --preview-method none
 | Animation (fast) | LTX Video 2B | ~4 GB | ComfyUI |
 | Animation (quality) | LTX-2.3 22B | ~16 GB | GGUF Q4_0 |
 | Animation (objects) | Wan2.2 Fun-5B | ~5 GB | GGUF Q8_0 |
-| Animation (best) | Wan2.2 I2V-A14B | ~20 GB | GGUF dual |
+| Animation (quality) | Wan2.2 I2V-A14B | ~20 GB | GGUF dual |
+| Animation (best) | SkyReels-V2 I2V-14B | ~10 GB | GGUF Q5_K_M |
 | Subtitles | Whisper Small | ~150 MB | MLX |
 | Images | FLUX Dev | ~16 GB | MLX BF16 |
 

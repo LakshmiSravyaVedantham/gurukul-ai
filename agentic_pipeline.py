@@ -52,12 +52,13 @@ for d in [AGENIC_DIR, DATASET_DIR]:
 # ── Model escalation order ─────────────────────────────────────────────────────
 # When a model fails the quality bar, escalate to the next tier.
 ESCALATION = [
-    "ken-burns",         # instant fallback
-    "ltx-2b",            # 40s, fast preview
-    "wan22-fun-5b-gguf", # 8-10min, object motion (ltx23-gguf skipped: TE dim mismatch)
-    "wan22-fun-5b",      # 12min, BF16 fallback
-    "ltx-13b",           # 11min, quality
-    "wan22-i2v-14b-gguf",# 15-20min, best quality
+    "ken-burns",          # instant fallback
+    "ltx-2b",             # 40s, fast preview
+    "wan22-fun-5b-gguf",  # 8-10min, object motion
+    "wan22-fun-5b",       # 12min, BF16 fallback
+    "ltx-13b",            # 11min, quality
+    "wan22-i2v-14b-gguf", # 15-20min, high quality dual-model
+    "skyreels-v2-gguf",   # 10-15min, best quality (benchmarks above Wan2.1-I2V)
 ]
 
 # ── Stage 1: Director — Gemma 4 prompt expansion ───────────────────────────────
