@@ -144,7 +144,9 @@ STYLE = (
     "beautiful Pixar 3D render, no text, no people, no characters"
 )
 
-NEG_PROMPT = "blurry, static, ugly, distorted, low quality, watermark, jitter"
+NEG_PROMPT = ("blurry, static, ugly, distorted, low quality, watermark, text, logo, "
+              "flickering, jitter, artifacts, overexposed, underexposed, noise, grain, "
+              "human faces, people, characters, dark, muddy colors, washed out")
 
 # ── GGUF model filenames ───────────────────────────────────────────────────────
 WAN22_FUN5B_GGUF = "Wan2.2-Fun-5B-InP-Q8_0.gguf"
@@ -311,35 +313,40 @@ def _wf_wan_fun_gguf(img_file, prompt, model_name, vae_name, num_frames, scene_i
 
 
 def _wf_wan22_i2v_gguf(img_file, prompt, high_name, low_name, num_frames, scene_id, prefix):
-    """Wan 2.2 I2V-A14B dual-model GGUF: HighNoise → LowNoise refinement."""
+    """Wan 2.2 I2V-A14B dual-model GGUF: HighNoise → LowNoise refinement.
+    Uses WanImageToVideo (correct node for I2V-A14B, not WanAnimateToVideo).
+    HighNoise does full denoising (steps=20), LowNoise refines (steps=10, denoise=0.5).
+    """
     num_frames = max(5, ((num_frames - 1) // 4) * 4 + 1)
+    pos_prompt = (prompt + ", smooth cinematic motion, high quality, vibrant colors, "
+                  "Pixar animated style, golden warm light, beautiful composition")
     return {
         "1":  {"class_type": "LoadImage",         "inputs": {"image": img_file}},
         "3":  {"class_type": "CLIPLoader",        "inputs": {"clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors", "type": "wan", "device": "default"}},
         "4":  {"class_type": "CLIPVisionLoader",  "inputs": {"clip_name": "sigclip_vision_patch14_384.safetensors"}},
         "5":  {"class_type": "VAELoader",         "inputs": {"vae_name": "wan2.2_vae.safetensors"}},
         "6":  {"class_type": "CLIPVisionEncode",  "inputs": {"clip_vision": ["4", 0], "image": ["1", 0], "crop": "center"}},
-        "7":  {"class_type": "CLIPTextEncode",    "inputs": {"text": prompt + ", smooth cinematic motion, high quality", "clip": ["3", 0]}},
+        "7":  {"class_type": "CLIPTextEncode",    "inputs": {"text": pos_prompt, "clip": ["3", 0]}},
         "8":  {"class_type": "CLIPTextEncode",    "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
-        # Stage 1: HighNoise
-        "20": {"class_type": "UnetLoaderGGUF",    "inputs": {"unet_name": high_name}},
-        "21": {"class_type": "WanAnimateToVideo",
+        # Conditioning — WanImageToVideo is correct for I2V-A14B
+        "9":  {"class_type": "WanImageToVideo",
                "inputs": {"positive": ["7", 0], "negative": ["8", 0], "vae": ["5", 0],
                           "width": 832, "height": 480, "length": num_frames, "batch_size": 1,
-                          "continue_motion_max_frames": 5, "video_frame_offset": 0,
-                          "clip_vision_output": ["6", 0], "reference_image": ["1", 0]}},
+                          "clip_vision_output": ["6", 0], "start_image": ["1", 0]}},
+        # Stage 1: HighNoise — full denoising
+        "20": {"class_type": "UnetLoaderGGUF",    "inputs": {"unet_name": high_name}},
         "22": {"class_type": "KSampler",
-               "inputs": {"model": ["20", 0], "positive": ["21", 0], "negative": ["21", 1],
-                          "latent_image": ["21", 2], "seed": 42 + scene_id,
-                          "steps": 10, "cfg": 5.0, "sampler_name": "euler",
+               "inputs": {"model": ["20", 0], "positive": ["9", 0], "negative": ["9", 1],
+                          "latent_image": ["9", 2], "seed": 42 + scene_id,
+                          "steps": 20, "cfg": 6.0, "sampler_name": "euler",
                           "scheduler": "linear_quadratic", "denoise": 1.0}},
-        # Stage 2: LowNoise refinement
+        # Stage 2: LowNoise — refinement pass
         "30": {"class_type": "UnetLoaderGGUF",    "inputs": {"unet_name": low_name}},
         "31": {"class_type": "KSampler",
-               "inputs": {"model": ["30", 0], "positive": ["21", 0], "negative": ["21", 1],
+               "inputs": {"model": ["30", 0], "positive": ["9", 0], "negative": ["9", 1],
                           "latent_image": ["22", 0], "seed": 42 + scene_id,
-                          "steps": 10, "cfg": 5.0, "sampler_name": "euler",
-                          "scheduler": "linear_quadratic", "denoise": 0.5}},
+                          "steps": 10, "cfg": 6.0, "sampler_name": "euler",
+                          "scheduler": "linear_quadratic", "denoise": 0.45}},
         "40": {"class_type": "VAEDecode",         "inputs": {"samples": ["31", 0], "vae": ["5", 0]}},
         "41": {"class_type": "SaveImage",         "inputs": {"images": ["40", 0], "filename_prefix": prefix}},
     }
