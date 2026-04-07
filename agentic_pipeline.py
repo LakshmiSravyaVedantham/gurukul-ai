@@ -102,7 +102,7 @@ print(response.strip(), flush=True)
 """
     result = subprocess.run(
         [MLX_PYTHON, "-c", script],
-        capture_output=True, text=True, timeout=180,
+        capture_output=True, text=True, timeout=600,
     )
     if result.returncode != 0 or not result.stdout.strip():
         # Fallback to simple enhancement
@@ -117,6 +117,8 @@ print(response.strip(), flush=True)
 
 # ── Stage 2: Creator — video generation ───────────────────────────────────────
 
+APP_PYTHON = "/usr/bin/python3"   # system python that has gradio + app.py deps
+
 def create_video(scene_id: int, model_key: str, prompt: str,
                  img_path: Path, audio_path: Path,
                  out_path: Path, attempt: int = 1,
@@ -125,19 +127,38 @@ def create_video(scene_id: int, model_key: str, prompt: str,
     attempt > 1: escalate params (more steps, higher CFG, different seed)."""
     if log_fn: log_fn(f"Stage 2 [Creator] — {model_key} (attempt {attempt})")
 
-    # Import animate_scene from app.py to reuse all workflow builders
-    sys.path.insert(0, str(AI_EDU_DIR))
-    from app import animate_scene
-
-    # On retry: patch the scene_id seed to avoid identical output
+    # On retry: vary seed by offsetting scene_id
     effective_scene_id = scene_id + (attempt - 1) * 100
 
-    clip, err = animate_scene(effective_scene_id, model_key, img_path, audio_path)
-    if clip and clip.exists():
-        shutil.copy2(str(clip), str(out_path))
-        if log_fn: log_fn(f"  Generated: {out_path.name} ({out_path.stat().st_size//1024}KB)")
+    # Call animate_scene via the system Python (which has gradio installed)
+    script = f"""
+import sys; sys.path.insert(0, {str(AI_EDU_DIR)!r})
+from app import animate_scene
+from pathlib import Path
+clip, err = animate_scene(
+    {effective_scene_id},
+    {model_key!r},
+    Path({str(img_path)!r}),
+    Path({str(audio_path)!r}),
+)
+if clip and Path(clip).exists():
+    import shutil
+    shutil.copy2(str(clip), {str(out_path)!r})
+    print("OK:" + str(clip), flush=True)
+else:
+    print("ERR:" + str(err or "unknown"), flush=True)
+"""
+    result = subprocess.run(
+        [APP_PYTHON, "-c", script],
+        capture_output=True, text=True, timeout=1200,
+    )
+    stdout = result.stdout.strip()
+    if result.returncode == 0 and stdout.startswith("OK:"):
+        if log_fn: log_fn(f"  Generated: {out_path.name} ({out_path.stat().st_size//1024 if out_path.exists() else '?'}KB)")
         return out_path, None
-    return None, err
+    err_msg = stdout.replace("ERR:", "") or result.stderr[-300:]
+    if log_fn: log_fn(f"  Creator failed: {err_msg[:200]}")
+    return None, err_msg
 
 
 # ── Stage 3: Critic — Qwen2.5-VL video scoring ────────────────────────────────
