@@ -18,7 +18,6 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Gurukul AI — Kids Educational Video Pipeline",
     description: "100% local AI pipeline for kids' educational videos. No cloud. No API keys.",
-    url: "https://gurukul-ai.vercel.app",
     siteName: "Gurukul AI",
   },
 };

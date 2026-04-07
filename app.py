@@ -997,19 +997,89 @@ _load_existing_session()
 # ── Build UI ───────────────────────────────────────────────────────────────────
 
 THEME = gr.themes.Soft(
-    primary_hue="orange",
-    secondary_hue="yellow",
+    primary_hue="violet",
+    secondary_hue="orange",
     neutral_hue="slate",
+    font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "sans-serif"],
 )
 
-with gr.Blocks(theme=THEME, title="Gurukul AI Video Generator") as demo:
+CUSTOM_CSS = """
+/* ── Global ────────────────────────────────── */
+body { background: #0f0f15 !important; }
+.gradio-container { max-width: 1100px !important; margin: 0 auto; }
+
+/* ── Header ────────────────────────────────── */
+#gurukul-header {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    border: 1px solid rgba(139,92,246,0.2);
+    border-radius: 16px;
+    padding: 28px 32px;
+    margin-bottom: 16px;
+}
+#gurukul-header h1 {
+    font-size: 2rem !important;
+    font-weight: 800 !important;
+    background: linear-gradient(90deg, #f59e0b, #f97316, #ec4899);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 0 0 8px 0 !important;
+}
+#gurukul-header p { color: rgba(255,255,255,0.5) !important; margin: 0 !important; font-size: 0.9rem; }
+
+/* ── Tabs ──────────────────────────────────── */
+.tab-nav button {
+    font-weight: 600 !important;
+    font-size: 0.85rem !important;
+    border-radius: 8px 8px 0 0 !important;
+}
+.tab-nav button.selected {
+    background: rgba(139,92,246,0.15) !important;
+    border-bottom: 2px solid #8b5cf6 !important;
+    color: #c4b5fd !important;
+}
+
+/* ── Buttons ───────────────────────────────── */
+button.primary {
+    background: linear-gradient(135deg, #7c3aed, #9333ea) !important;
+    border: none !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.02em !important;
+    border-radius: 10px !important;
+    box-shadow: 0 4px 15px rgba(124,58,237,0.3) !important;
+    transition: all 0.2s !important;
+}
+button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(124,58,237,0.4) !important; }
+
+button.secondary {
+    background: rgba(255,255,255,0.06) !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 10px !important;
+}
+
+/* ── Blocks / panels ───────────────────────── */
+.block { border-radius: 12px !important; border: 1px solid rgba(255,255,255,0.06) !important; }
+.prose h2 { color: #c4b5fd !important; font-size: 1.1rem !important; font-weight: 700 !important; }
+.prose h3 { color: #a78bfa !important; }
+
+/* ── /selfimprove tab ──────────────────────── */
+#selfimprove-header {
+    background: linear-gradient(135deg, rgba(109,40,217,0.3), rgba(236,72,153,0.15));
+    border: 1px solid rgba(139,92,246,0.25);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 8px;
+}
+
+/* ── Log output ────────────────────────────── */
+.prose code { background: rgba(255,255,255,0.08) !important; border-radius: 4px; padding: 1px 5px; font-size: 0.8rem; }
+"""
+
+with gr.Blocks(theme=THEME, title="Gurukul AI — Kids Video Pipeline", css=CUSTOM_CSS) as demo:
 
     gr.Markdown("""
-# 🏝️ Gurukul AI — Kids Educational Video Generator
-**Full pipeline:** Topic → Gemma script → FLUX images → TTS narration → Animation → Final video
-
-All models run locally on your Mac Studio M4 Max. No internet needed after first model downloads.
-    """)
+# 🎓 Gurukul AI — Kids Educational Video Generator
+**Topic → Research → Script → Images → Audio → Animation → Final Video** &nbsp;·&nbsp; 100% local · Apple Silicon · Free
+    """, elem_id="gurukul-header")
 
     # ── Status bar ──────────────────────────────────────────────────────────
     with gr.Row():
@@ -1020,7 +1090,7 @@ All models run locally on your Mac Studio M4 Max. No internet needed after first
 
     # ── Model selector ───────────────────────────────────────────────────────
     with gr.Group():
-        gr.Markdown("## 🎬 Choose Animation Model")
+        gr.Markdown("## 🎬 Animation Model")
         with gr.Row():
             with gr.Column(scale=3):
                 model_radio = gr.Radio(
@@ -1267,13 +1337,13 @@ Useful for model comparison — animate the same scene with different models.
     # ── Tab: /selfimprove — Agentic Pipeline ──────────────────────────────────
     with gr.Tab("⚡ /selfimprove"):
         gr.Markdown("""
-## Agentic Self-Improving Pipeline
-**5 stages run automatically:**
-`Director (Gemma 4)` → `Creator (your model)` → `Critic (Qwen2.5-VL)` → `Refiner (auto-retry)` → `Polisher (Topaz 4K)`
+## ⚡ Agentic Self-Improving Pipeline
 
-The Critic scores every video 1-10. If below your threshold, the pipeline escalates to a better model and retries automatically.
-Run on all models at once to build a **leaderboard** — the winner feeds your training dataset.
-        """)
+**5 stages run automatically:**
+`🎭 Director (Gemma 4)` → `🎬 Creator` → `🔍 Critic (Qwen2.5-VL · scores 1–10)` → `🔄 Refiner (auto-escalate)` → `✨ Polisher (Topaz 4K)`
+
+If score < threshold → escalates to next model automatically. Run **Benchmark ALL** to rank every model and build your training dataset.
+        """, elem_id="selfimprove-header")
 
         with gr.Row():
             with gr.Column(scale=3):

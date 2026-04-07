@@ -1,4 +1,4 @@
-import { Play, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 function GithubIcon({ size = 18 }: { size?: number }) {
   return (
@@ -19,26 +19,15 @@ export default function Home() {
             <span className="text-2xl">🎓</span>
             <span className="font-bold text-lg tracking-tight">Gurukul AI</span>
           </div>
-          <div className="flex items-center gap-4">
-            <a
-              href="https://github.com/LakshmiSravyaVedantham/gurukul-ai"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition text-sm font-medium"
-            >
-              <GithubIcon size={16} />
-              GitHub
-            </a>
-            <a
-              href="https://www.youtube.com/@GurukuIAI"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 transition text-sm font-medium"
-            >
-              <Play size={16} fill="white" />
-              YouTube
-            </a>
-          </div>
+          <a
+            href="https://github.com/LakshmiSravyaVedantham/gurukul-ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 transition text-sm font-medium"
+          >
+            <GithubIcon size={16} />
+            GitHub
+          </a>
         </div>
       </nav>
 
@@ -65,25 +54,99 @@ export default function Home() {
             script, images, narration, animation, subtitles — fully local, zero cloud costs.
           </p>
 
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            <a
-              href="https://github.com/LakshmiSravyaVedantham/gurukul-ai"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-white text-black font-semibold hover:bg-white/90 transition text-base"
-            >
-              <GithubIcon size={18} />
-              Get the Code
-            </a>
-            <a
-              href="https://www.youtube.com/@GurukuIAI"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-semibold transition text-base"
-            >
-              <Play size={18} fill="white" />
-              Watch on YouTube
-            </a>
+          <a
+            href="https://github.com/LakshmiSravyaVedantham/gurukul-ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white text-black font-semibold hover:bg-white/90 transition text-base"
+          >
+            <GithubIcon size={18} />
+            Get the Code
+          </a>
+        </div>
+      </section>
+
+      {/* ── App showcase ────────────────────────────── */}
+      <section className="py-20 px-6">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-14">
+            <h2 className="text-3xl font-bold mb-3">How It Works Locally</h2>
+            <p className="text-white/50">Open <code className="text-purple-400 bg-white/5 px-1.5 py-0.5 rounded text-sm">http://localhost:7860</code> after running <code className="text-green-400 bg-white/5 px-1.5 py-0.5 rounded text-sm">python app.py</code></p>
+          </div>
+
+          <div className="space-y-6">
+
+            {/* Step 1 — Generate Script */}
+            <div className="rounded-2xl border border-white/8 bg-white/[0.03] overflow-hidden">
+              {/* Browser chrome */}
+              <div className="flex items-center gap-2 px-4 py-3 bg-white/[0.04] border-b border-white/5">
+                <div className="w-3 h-3 rounded-full bg-red-500/60" />
+                <div className="w-3 h-3 rounded-full bg-yellow-500/60" />
+                <div className="w-3 h-3 rounded-full bg-green-500/60" />
+                <div className="ml-3 flex-1 bg-white/5 rounded px-3 py-1 text-xs text-white/30 font-mono">localhost:7860</div>
+              </div>
+              {/* Tab bar */}
+              <div className="flex gap-1 px-4 py-2 border-b border-white/5 overflow-x-auto">
+                {["1. Generate Script", "2. Scene Images", "3. Narration", "4. Animate", "5. Assemble", "6. Subtitles", "⚡ /selfimprove"].map((t, i) => (
+                  <span key={t} className={`text-xs px-3 py-1.5 rounded-t whitespace-nowrap ${i === 0 ? "bg-white/10 text-white font-medium" : "text-white/30"}`}>{t}</span>
+                ))}
+              </div>
+              {/* Content */}
+              <div className="p-6 grid sm:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="text-xs text-white/40 uppercase tracking-wider">Topic</label>
+                  <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm text-white/80 font-mono">photosynthesis</div>
+                  <div className="flex gap-2">
+                    <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-xs text-white/50">✓ Web research first</div>
+                    <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-xs text-white/50">10 scenes</div>
+                  </div>
+                  <div className="bg-purple-600 rounded-lg px-4 py-2.5 text-sm font-semibold text-center cursor-default">🧠 Generate Script with Gemma</div>
+                </div>
+                <div className="bg-white/[0.02] rounded-xl p-4 border border-white/5 text-xs text-white/50 space-y-2 font-mono">
+                  <div className="text-green-400">Stage 0: Researching topic online...</div>
+                  <div className="text-white/30">→ Wikipedia: Photosynthesis is...</div>
+                  <div className="text-white/30">→ DuckDuckGo: 5 facts found</div>
+                  <div className="text-green-400">Stage 1: Generating with Gemma 3 4B...</div>
+                  <div className="text-white/30">Island: Photosynthesis Forest Island</div>
+                  <div className="text-white/30">Scene 1: Aerial view of glowing green...</div>
+                  <div className="text-white/30">Scene 2: A single leaf magnified...</div>
+                  <div className="text-green-400">✓ Script saved (10 scenes)</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Step 2 — selfimprove */}
+            <div className="rounded-2xl border border-purple-500/20 bg-white/[0.03] overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 bg-white/[0.04] border-b border-white/5">
+                <div className="w-3 h-3 rounded-full bg-red-500/60" />
+                <div className="w-3 h-3 rounded-full bg-yellow-500/60" />
+                <div className="w-3 h-3 rounded-full bg-green-500/60" />
+                <div className="ml-3 flex-1 bg-white/5 rounded px-3 py-1 text-xs text-white/30 font-mono">localhost:7860 — ⚡ /selfimprove</div>
+              </div>
+              <div className="p-6 grid sm:grid-cols-2 gap-6">
+                <div className="space-y-3">
+                  <label className="text-xs text-white/40 uppercase tracking-wider">Simple Prompt</label>
+                  <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-3 text-sm text-white/80 font-mono">coin slowly flipping in golden light</div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <div className="bg-white/5 border border-white/10 rounded-lg p-2 text-center"><div className="text-white/30">Scene</div><div className="text-white font-bold">3</div></div>
+                    <div className="bg-white/5 border border-white/10 rounded-lg p-2 text-center"><div className="text-white/30">Min score</div><div className="text-white font-bold">7.0</div></div>
+                    <div className="bg-white/5 border border-white/10 rounded-lg p-2 text-center"><div className="text-white/30">Max tries</div><div className="text-white font-bold">3</div></div>
+                  </div>
+                  <div className="bg-purple-600 rounded-lg px-4 py-2.5 text-sm font-semibold text-center cursor-default">▶ Run Single Model</div>
+                </div>
+                <div className="bg-white/[0.02] rounded-xl p-4 border border-white/5 text-xs text-white/50 space-y-1.5 font-mono">
+                  <div className="text-purple-400">Stage 1 [Director] — Gemma 4...</div>
+                  <div className="text-white/30">Expanded: A golden coin tumbles slowly...</div>
+                  <div className="text-blue-400">Stage 2 [Creator] — ltx-2b attempt 1</div>
+                  <div className="text-white/30">Generated: scene3_ltx2b_a1.mp4 (341KB)</div>
+                  <div className="text-yellow-400">Stage 3 [Critic] — Qwen2.5-VL...</div>
+                  <div className="text-white/30">Motion: 6  Visual: 7  Prompt: 8  Cinema: 7</div>
+                  <div className="text-green-400">Overall: 7.0 ✓ Accepted!</div>
+                  <div className="text-white/30">Saved to training dataset.</div>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </section>
@@ -260,26 +323,15 @@ export default function Home() {
             <div><span className="text-white/30">$ </span>cd gurukul-ai &amp;&amp; pip install -r requirements.txt</div>
             <div><span className="text-white/30">$ </span>python app.py<span className="text-white/30">  # open http://localhost:7860</span></div>
           </div>
-          <div className="flex flex-wrap justify-center gap-4">
-            <a
-              href="https://github.com/LakshmiSravyaVedantham/gurukul-ai"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-6 py-3 rounded-xl bg-white text-black font-semibold hover:bg-white/90 transition"
-            >
-              <GithubIcon size={18} />
-              View on GitHub
-            </a>
-            <a
-              href="https://www.youtube.com/@GurukuIAI"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-6 py-3 rounded-xl border border-white/10 hover:bg-white/5 transition"
-            >
-              <Play size={18} />
-              Watch Videos
-            </a>
-          </div>
+          <a
+            href="https://github.com/LakshmiSravyaVedantham/gurukul-ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white text-black font-semibold hover:bg-white/90 transition"
+          >
+            <GithubIcon size={18} />
+            View on GitHub
+          </a>
         </div>
       </section>
 
