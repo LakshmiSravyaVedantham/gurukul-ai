@@ -996,82 +996,182 @@ _load_existing_session()
 
 # ── Build UI ───────────────────────────────────────────────────────────────────
 
-THEME = gr.themes.Soft(
-    primary_hue="violet",
+THEME = gr.themes.Base(
+    primary_hue="amber",
     secondary_hue="orange",
-    neutral_hue="slate",
-    font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "sans-serif"],
+    neutral_hue="zinc",
+    font=[gr.themes.GoogleFont("Plus Jakarta Sans"), "ui-sans-serif", "sans-serif"],
+    font_mono=[gr.themes.GoogleFont("JetBrains Mono"), "ui-monospace", "monospace"],
 )
 
 CUSTOM_CSS = """
-/* ── Global ────────────────────────────────── */
-body { background: #0f0f15 !important; }
-.gradio-container { max-width: 1100px !important; margin: 0 auto; }
+/* ── Base ───────────────────────────────────── */
+:root {
+    --bg:       #0c0c10;
+    --surface:  #141418;
+    --border:   rgba(255,255,255,0.07);
+    --gold:     #f59e0b;
+    --coral:    #f97316;
+    --teal:     #14b8a6;
+    --text:     #f1f1f3;
+    --muted:    rgba(241,241,243,0.45);
+}
 
-/* ── Header ────────────────────────────────── */
+body, .gradio-container { background: var(--bg) !important; color: var(--text) !important; }
+.gradio-container { max-width: 1120px !important; margin: 0 auto !important; padding: 16px !important; }
+footer { display: none !important; }
+
+/* ── Header ─────────────────────────────────── */
 #gurukul-header {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-    border: 1px solid rgba(139,92,246,0.2);
-    border-radius: 16px;
-    padding: 28px 32px;
-    margin-bottom: 16px;
+    background: linear-gradient(120deg, #1c1408 0%, #1a1200 40%, #0d1a14 100%);
+    border: 1px solid rgba(245,158,11,0.25);
+    border-radius: 18px;
+    padding: 28px 36px 24px;
+    margin-bottom: 20px;
+    position: relative;
+    overflow: hidden;
+}
+#gurukul-header::before {
+    content: "";
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 220px; height: 220px;
+    background: radial-gradient(circle, rgba(245,158,11,0.12), transparent 70%);
+    pointer-events: none;
 }
 #gurukul-header h1 {
-    font-size: 2rem !important;
+    font-size: 1.9rem !important;
     font-weight: 800 !important;
-    background: linear-gradient(90deg, #f59e0b, #f97316, #ec4899);
+    background: linear-gradient(90deg, #fbbf24 0%, #f97316 50%, #14b8a6 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
-    margin: 0 0 8px 0 !important;
+    background-clip: text;
+    margin: 0 0 6px !important;
+    line-height: 1.2 !important;
 }
-#gurukul-header p { color: rgba(255,255,255,0.5) !important; margin: 0 !important; font-size: 0.9rem; }
+#gurukul-header p {
+    color: var(--muted) !important;
+    margin: 0 !important;
+    font-size: 0.88rem !important;
+    line-height: 1.6 !important;
+}
 
-/* ── Tabs ──────────────────────────────────── */
+/* ── Status bar ─────────────────────────────── */
+#status-row { gap: 8px !important; }
+
+/* ── Tabs ───────────────────────────────────── */
+.tab-nav {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+    padding: 4px !important;
+    gap: 2px !important;
+    margin-bottom: 16px !important;
+}
 .tab-nav button {
     font-weight: 600 !important;
-    font-size: 0.85rem !important;
-    border-radius: 8px 8px 0 0 !important;
+    font-size: 0.82rem !important;
+    border-radius: 8px !important;
+    padding: 8px 14px !important;
+    border: none !important;
+    color: var(--muted) !important;
+    transition: all 0.15s !important;
 }
 .tab-nav button.selected {
-    background: rgba(139,92,246,0.15) !important;
-    border-bottom: 2px solid #8b5cf6 !important;
-    color: #c4b5fd !important;
+    background: linear-gradient(135deg, rgba(245,158,11,0.2), rgba(249,115,22,0.15)) !important;
+    color: #fbbf24 !important;
+    border: 1px solid rgba(245,158,11,0.3) !important;
 }
 
-/* ── Buttons ───────────────────────────────── */
-button.primary {
-    background: linear-gradient(135deg, #7c3aed, #9333ea) !important;
-    border: none !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.02em !important;
+/* ── Inputs ─────────────────────────────────── */
+input, textarea, select {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
     border-radius: 10px !important;
-    box-shadow: 0 4px 15px rgba(124,58,237,0.3) !important;
-    transition: all 0.2s !important;
+    color: var(--text) !important;
+    transition: border-color 0.15s !important;
 }
-button.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(124,58,237,0.4) !important; }
+input:focus, textarea:focus {
+    border-color: rgba(245,158,11,0.5) !important;
+    box-shadow: 0 0 0 3px rgba(245,158,11,0.1) !important;
+}
+
+/* ── Buttons ─────────────────────────────────── */
+button.primary, .primary {
+    background: linear-gradient(135deg, #d97706, #ea580c) !important;
+    border: none !important;
+    border-radius: 10px !important;
+    font-weight: 700 !important;
+    font-size: 0.9rem !important;
+    letter-spacing: 0.02em !important;
+    box-shadow: 0 4px 16px rgba(217,119,6,0.35) !important;
+    transition: all 0.18s !important;
+    color: #fff !important;
+}
+button.primary:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 8px 24px rgba(217,119,6,0.45) !important;
+}
 
 button.secondary {
-    background: rgba(255,255,255,0.06) !important;
-    border: 1px solid rgba(255,255,255,0.1) !important;
+    background: rgba(255,255,255,0.05) !important;
+    border: 1px solid var(--border) !important;
     border-radius: 10px !important;
+    color: var(--muted) !important;
+    transition: all 0.15s !important;
+}
+button.secondary:hover {
+    background: rgba(255,255,255,0.09) !important;
+    color: var(--text) !important;
 }
 
-/* ── Blocks / panels ───────────────────────── */
-.block { border-radius: 12px !important; border: 1px solid rgba(255,255,255,0.06) !important; }
-.prose h2 { color: #c4b5fd !important; font-size: 1.1rem !important; font-weight: 700 !important; }
-.prose h3 { color: #a78bfa !important; }
+/* ── Panels & blocks ─────────────────────────── */
+.block, .form {
+    background: var(--surface) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px !important;
+}
 
-/* ── /selfimprove tab ──────────────────────── */
+/* ── Labels ─────────────────────────────────── */
+label span, .label-wrap span {
+    font-weight: 600 !important;
+    font-size: 0.82rem !important;
+    color: rgba(251,191,36,0.8) !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.06em !important;
+}
+
+/* ── Markdown headings ───────────────────────── */
+.prose h2 { color: #fbbf24 !important; font-size: 1.05rem !important; font-weight: 700 !important; margin-top: 0 !important; }
+.prose h3 { color: #fb923c !important; font-weight: 600 !important; }
+.prose code {
+    background: rgba(245,158,11,0.12) !important;
+    color: #fde68a !important;
+    border-radius: 5px !important;
+    padding: 2px 6px !important;
+    font-size: 0.82rem !important;
+}
+.prose strong { color: var(--text) !important; }
+
+/* ── /selfimprove header ─────────────────────── */
 #selfimprove-header {
-    background: linear-gradient(135deg, rgba(109,40,217,0.3), rgba(236,72,153,0.15));
-    border: 1px solid rgba(139,92,246,0.25);
+    background: linear-gradient(120deg, rgba(20,184,166,0.12), rgba(14,165,233,0.08));
+    border: 1px solid rgba(20,184,166,0.25);
     border-radius: 12px;
-    padding: 16px 20px;
-    margin-bottom: 8px;
+    padding: 18px 22px;
+    margin-bottom: 12px;
 }
 
-/* ── Log output ────────────────────────────── */
-.prose code { background: rgba(255,255,255,0.08) !important; border-radius: 4px; padding: 1px 5px; font-size: 0.8rem; }
+/* ── Sliders ─────────────────────────────────── */
+input[type=range]::-webkit-slider-thumb {
+    background: #f59e0b !important;
+}
+input[type=range]::-webkit-slider-runnable-track {
+    background: linear-gradient(90deg, #f59e0b, #f97316) !important;
+}
+
+/* ── Radio ───────────────────────────────────── */
+.wrap label { border-radius: 8px !important; }
 """
 
 with gr.Blocks(theme=THEME, title="Gurukul AI — Kids Video Pipeline", css=CUSTOM_CSS) as demo:
