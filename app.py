@@ -345,16 +345,25 @@ def _wf_wan22_i2v_gguf(img_file, prompt, high_name, low_name, num_frames, scene_
     }
 
 
-def _wf_ltx23_gguf(img_file, prompt, model_name, te_name, vae_name, num_frames, scene_id, prefix):
-    """LTX-2.3 22B distilled GGUF I2V workflow."""
+LTX23_GEMMA  = "gemma-3-12b-it-Q4_K_M.gguf"   # Gemma-3 12B GGUF — LTX-2.3 text encoder
+
+def _wf_ltx23_gguf(img_file, prompt, model_name, gemma_name, connector_name, vae_name, num_frames, scene_id, prefix):
+    """LTX-2.3 22B distilled GGUF I2V workflow.
+    Requires Gemma-3 12B GGUF as text encoder (CLIPType ltxav).
+    embeddings_connectors.safetensors projects Gemma 3840-dim → video 4096-dim.
+    Both files are loaded together via DualCLIPLoader with type 'ltxav'.
+    """
     num_frames = max(9, ((num_frames - 9) // 8) * 8 + 9)
+    pos_prompt  = prompt + ", smooth cinematic motion, high quality, Pixar style, beautiful lighting"
     return {
         "1":  {"class_type": "LoadImage",            "inputs": {"image": img_file}},
         "2":  {"class_type": "UnetLoaderGGUF",       "inputs": {"unet_name": model_name}},
-        "3":  {"class_type": "CLIPLoader",           "inputs": {"clip_name": te_name, "type": "ltxv"}},
+        # Gemma-3 12B + embeddings connector together via DualCLIPLoader (type ltxav)
+        "3":  {"class_type": "DualCLIPLoader",
+               "inputs": {"clip_name1": gemma_name, "clip_name2": connector_name, "type": "ltxav"}},
         "4":  {"class_type": "VAELoader",            "inputs": {"vae_name": vae_name}},
-        "5":  {"class_type": "CLIPTextEncode",       "inputs": {"text": prompt + ", smooth cinematic motion, high quality, beautiful", "clip": ["3", 0]}},
-        "6":  {"class_type": "CLIPTextEncode",       "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
+        "5":  {"class_type": "CLIPTextEncode",       "inputs": {"text": pos_prompt,  "clip": ["3", 0]}},
+        "6":  {"class_type": "CLIPTextEncode",       "inputs": {"text": NEG_PROMPT,  "clip": ["3", 0]}},
         "7":  {"class_type": "LTXVImgToVideo",
                "inputs": {"positive": ["5", 0], "negative": ["6", 0], "vae": ["4", 0],
                           "image": ["1", 0], "width": 768, "height": 512,
@@ -492,13 +501,16 @@ def animate_scene(scene_id: int, model_key: str, img_path: Path, audio_path: Pat
         wf = _wf_wan22_i2v_gguf(img_file, prompt, high.name, low.name,
                                  num_frames=33, scene_id=scene_id, prefix=prefix)
     elif model_key == "ltx23-gguf":
-        mp  = COMFYUI_DIR / "models" / "diffusion_models" / LTX23_DISTILLED
-        te  = COMFYUI_DIR / "models" / "text_encoders" / LTX23_TE
+        mp     = COMFYUI_DIR / "models" / "diffusion_models" / LTX23_DISTILLED
+        te     = COMFYUI_DIR / "models" / "text_encoders"    / LTX23_TE
+        gemma  = COMFYUI_DIR / "models" / "text_encoders"    / LTX23_GEMMA
         if not mp.exists():
             return None, f"{LTX23_DISTILLED} not downloaded yet"
         if not te.exists():
             return None, f"{LTX23_TE} not downloaded yet"
-        wf = _wf_ltx23_gguf(img_file, prompt, mp.name, LTX23_TE, LTX23_VAE,
+        if not gemma.exists():
+            return None, f"Gemma-3 12B GGUF not downloaded yet — run download_models.py --ltx23-te"
+        wf = _wf_ltx23_gguf(img_file, prompt, mp.name, LTX23_GEMMA, LTX23_TE, LTX23_VAE,
                              num_frames=97, scene_id=scene_id, prefix=prefix)
     else:
         return None, f"Unknown model: {model_key}"
@@ -766,7 +778,7 @@ def check_model_availability():
     # GGUF models
     status["wan22-fun-5b-gguf"] = comfy_up and (dm / WAN22_FUN5B_GGUF).exists()
     status["wan22-i2v-14b-gguf"]= comfy_up and (dm / WAN22_14B_HIGH).exists() and (dm / WAN22_14B_LOW).exists()
-    status["ltx23-gguf"]        = comfy_up and (dm / LTX23_DISTILLED).exists() and (te / LTX23_TE).exists()
+    status["ltx23-gguf"]        = comfy_up and (dm / LTX23_DISTILLED).exists() and (te / LTX23_TE).exists() and (te / LTX23_GEMMA).exists()
 
     return status, comfy_up
 
