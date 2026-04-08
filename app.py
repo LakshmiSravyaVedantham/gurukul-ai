@@ -721,7 +721,7 @@ except ImportError as e:
     sys.exit(1)
 generate_video(
     model_repo="prince-canuma/LTX-2.3-distilled",
-    text_encoder_repo=None,
+    text_encoder_repo="prince-canuma/LTX-2.3-distilled",
     prompt={prompt!r},
     pipeline=PipelineType.DISTILLED,
     negative_prompt={NEG_PROMPT!r},
