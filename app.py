@@ -96,9 +96,18 @@ MODELS = {
         "engine":  "MLX",
         "time":    "~30min/scene",
         "quality": "★★★☆☆",
-        "best_for": "Research / no ComfyUI",
-        "desc":    "prince-canuma/LTX-2-distilled running natively on Apple Silicon via mlx-video. Doesn't need ComfyUI. Uses ~36 GB RAM — close to the 36 GB limit.",
+        "best_for": "No ComfyUI needed",
+        "desc":    "prince-canuma/LTX-2-distilled running natively on Apple Silicon via mlx-video. Uses Neural Engine + GPU together.",
         "badge":   "NO COMFYUI",
+    },
+    "mlx-ltx23": {
+        "label":   "MLX LTX-2.3 22B (Apple Silicon native)",
+        "engine":  "MLX",
+        "time":    "~15-25min/scene",
+        "quality": "★★★★☆",
+        "best_for": "Best MLX-native quality — no ComfyUI, no MoE",
+        "desc":    "prince-canuma/LTX-2.3-distilled — 22B dense transformer, 8 steps distilled, runs entirely on Neural Engine + GPU via MLX. No ComfyUI needed. Auto-downloaded on first run.",
+        "badge":   "MLX NATIVE",
     },
     # ── MLX native models ────────────────────────────────────────────────────
     "wan22-ti2v-5b-mlx": {
@@ -545,6 +554,12 @@ def animate_scene(scene_id: int, model_key: str, img_path: Path, audio_path: Pat
             _ensure_min_duration(path)
         return path, err
 
+    if model_key == "mlx-ltx23":
+        path, err = _animate_ltx23_mlx(scene_id, img_path, out)
+        if path:
+            _ensure_min_duration(path)
+        return path, err
+
     if model_key == "wan22-ti2v-5b-mlx":
         path, err = _animate_wan_ti2v_mlx(scene_id, img_path, out)
         if path:
@@ -688,6 +703,46 @@ generate_video(
     if r.returncode == 0 and out.exists():
         return out, None
     return None, r.stderr[-500:]
+
+def _animate_ltx23_mlx(scene_id: int, img_path: Path, out: Path) -> tuple:
+    """LTX-2.3 22B via mlx-video — native Apple Silicon, no ComfyUI.
+    Uses prince-canuma/LTX-2.3-distilled (MLX bf16 weights).
+    Auto-detected as LTX-2.3 by mlx-video (has_prompt_adaln=True).
+    Distilled pipeline: 8 steps, no CFG, fast two-stage with upsampling.
+    """
+    prompt = (_default_anim_prompt(scene_id) +
+              ", smooth cinematic motion, high quality, Pixar style, beautiful lighting")
+    script = f"""
+import sys
+try:
+    from mlx_video.models.ltx_2.generate import generate_video, PipelineType
+except ImportError as e:
+    print(f"Import error: {{e}}", flush=True)
+    sys.exit(1)
+generate_video(
+    model_repo="prince-canuma/LTX-2.3-distilled",
+    text_encoder_repo=None,
+    prompt={prompt!r},
+    pipeline=PipelineType.DISTILLED,
+    negative_prompt={NEG_PROMPT!r},
+    height=480, width=832,
+    num_frames=33,
+    num_inference_steps=8,
+    image_path={str(img_path)!r},
+    image_frame_strength=1.0,
+    seed={42 + scene_id},
+    output_path={str(out)!r},
+    tiling="auto",
+)
+"""
+    r = subprocess.run(
+        [MLX_PYTHON, "-c", script],
+        capture_output=True, text=True, timeout=7200,
+    )
+    if r.returncode == 0 and out.exists():
+        return out, None
+    return None, r.stderr[-800:]
+
 
 # ── Gemma script generation ────────────────────────────────────────────────────
 

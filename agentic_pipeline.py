@@ -56,9 +56,9 @@ ESCALATION = [
     "ltx-2b",             # 40s, fast preview
     "wan22-fun-5b-gguf",  # 8-10min, object motion
     "wan22-fun-5b",       # 12min, BF16 fallback
+    "mlx-ltx23",          # 15-25min, 22B dense MLX native (no ComfyUI, Neural Engine)
     "ltx-13b",            # 11min, quality
-    "wan22-i2v-14b-gguf", # 15-20min, high quality dual-model
-    "skyreels-v2-gguf",   # 10-15min, best quality (benchmarks above Wan2.1-I2V)
+    "wan22-i2v-14b-gguf", # 15-20min, best quality dual-model
 ]
 
 # ── Stage 1: Director — Gemma 4 prompt expansion ───────────────────────────────
