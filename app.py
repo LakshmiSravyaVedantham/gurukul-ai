@@ -9,6 +9,9 @@ Start:
 """
 
 import json, os, re, shutil, subprocess, sys, textwrap, time, threading, urllib.request
+
+# Limit MPS to 70% of unified memory to prevent OOM crashes on Apple Silicon
+os.environ.setdefault("PYTORCH_MPS_HIGH_WATERMARK_RATIO", "0.7")
 from pathlib import Path
 
 import gradio as gr
@@ -118,22 +121,22 @@ MODELS = {
         "badge":   "GGUF UPGRADE",
     },
     "wan22-i2v-14b-gguf": {
-        "label":   "Wan 2.2 I2V-A14B GGUF",
+        "label":   "Wan 2.2 I2V-A14B GGUF (best quality)",
         "engine":  "ComfyUI",
         "time":    "~15-20min/scene",
         "quality": "★★★★★",
         "best_for": "Hero scenes, maximum quality finals",
-        "desc":    "Wan 2.2 I2V 14B dual-model (HighNoise Q5_0 + LowNoise Q4_0) via GGUF loader. Best-in-class motion quality.",
-        "badge":   "HIGH QUALITY",
+        "desc":    "Wan 2.2 I2V 14B dual-model (HighNoise Q5_0 + LowNoise Q4_0). Best quality on Apple Silicon — proven on M4 Max 36GB.",
+        "badge":   "BEST QUALITY",
     },
     "skyreels-v2-gguf": {
-        "label":   "SkyReels-V2 I2V-14B GGUF (best quality)",
+        "label":   "SkyReels-V2 I2V-14B GGUF (experimental)",
         "engine":  "ComfyUI",
-        "time":    "~10-15min/scene",
+        "time":    "~30min+/scene on MPS",
         "quality": "★★★★★",
-        "best_for": "All scenes — benchmarks above Wan2.1-I2V, approaching Kling/Runway quality",
-        "desc":    "SkyReels-V2 I2V 14B Q5_K_M GGUF. Built on Wan backbone with superior motion training. Single-pass (faster than Wan2.2 dual-model). Uses ViT-H clip_vision + wan_2.1_vae.",
-        "badge":   "BEST QUALITY",
+        "best_for": "NVIDIA GPUs — very slow on Apple Silicon MPS",
+        "desc":    "SkyReels-V2 I2V 14B Q4_K_M. Benchmarks above Wan2.1-I2V on NVIDIA but 30+ min/scene on MPS. Use Wan2.2 I2V instead.",
+        "badge":   "EXPERIMENTAL",
     },
     "ltx23-gguf": {
         "label":   "LTX-2.3 22B GGUF (newest LTX)",
@@ -361,7 +364,7 @@ def _wf_wan22_i2v_gguf(img_file, prompt, high_name, low_name, num_frames, scene_
     }
 
 
-SKYREELS_V2_GGUF = "Skywork-SkyReels-V2-I2V-14B-540P-Q5_K_M.gguf"
+SKYREELS_V2_GGUF = "Skywork-SkyReels-V2-I2V-14B-540P-Q4_K_M.gguf"
 
 def _wf_skyreels_v2_gguf(img_file, prompt, model_name, num_frames, scene_id, prefix):
     """SkyReels-V2 I2V-14B GGUF — single-pass I2V, same Wan backbone.
@@ -381,7 +384,7 @@ def _wf_skyreels_v2_gguf(img_file, prompt, model_name, num_frames, scene_id, pre
         "8":  {"class_type": "CLIPTextEncode",   "inputs": {"text": NEG_PROMPT, "clip": ["3", 0]}},
         "9":  {"class_type": "WanImageToVideo",
                "inputs": {"positive": ["7", 0], "negative": ["8", 0], "vae": ["5", 0],
-                          "width": 960, "height": 544, "length": num_frames, "batch_size": 1,
+                          "width": 832, "height": 480, "length": num_frames, "batch_size": 1,
                           "clip_vision_output": ["6", 0], "start_image": ["1", 0]}},
         "20": {"class_type": "UnetLoaderGGUF",   "inputs": {"unet_name": model_name}},
         "22": {"class_type": "KSampler",
@@ -595,7 +598,7 @@ def animate_scene(scene_id: int, model_key: str, img_path: Path, audio_path: Pat
         if not mp.exists():
             return None, f"{SKYREELS_V2_GGUF} not downloaded yet"
         wf = _wf_skyreels_v2_gguf(img_file, prompt, mp.name,
-                                   num_frames=49, scene_id=scene_id, prefix=prefix)
+                                   num_frames=25, scene_id=scene_id, prefix=prefix)
     elif model_key == "ltx23-gguf":
         mp     = COMFYUI_DIR / "models" / "diffusion_models" / LTX23_DISTILLED
         te     = COMFYUI_DIR / "models" / "text_encoders"    / LTX23_TE
